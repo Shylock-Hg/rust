@@ -117,77 +117,11 @@ impl<T: ?Sized> *mut T {
         self as _
     }
 
-    /// Casts a pointer to its raw bits.
-    ///
-    /// This is equivalent to `as usize`, but is more specific to enhance readability.
-    /// The inverse method is [`from_bits`](pointer#method.from_bits-1).
-    ///
-    /// In particular, `*p as usize` and `p as usize` will both compile for
-    /// pointers to numeric types but do very different things, so using this
-    /// helps emphasize that reading the bits was intentional.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(ptr_to_from_bits)]
-    /// # #[cfg(not(miri))] { // doctest does not work with strict provenance
-    /// let mut array = [13, 42];
-    /// let mut it = array.iter_mut();
-    /// let p0: *mut i32 = it.next().unwrap();
-    /// assert_eq!(<*mut _>::from_bits(p0.to_bits()), p0);
-    /// let p1: *mut i32 = it.next().unwrap();
-    /// assert_eq!(p1.to_bits() - p0.to_bits(), 4);
-    /// }
-    /// ```
-    #[unstable(feature = "ptr_to_from_bits", issue = "91126")]
-    #[deprecated(
-        since = "1.67.0",
-        note = "replaced by the `expose_provenance` method, or update your code \
-            to follow the strict provenance rules using its APIs"
-    )]
-    #[inline(always)]
-    pub fn to_bits(self) -> usize
-    where
-        T: Sized,
-    {
-        self as usize
-    }
-
-    /// Creates a pointer from its raw bits.
-    ///
-    /// This is equivalent to `as *mut T`, but is more specific to enhance readability.
-    /// The inverse method is [`to_bits`](pointer#method.to_bits-1).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(ptr_to_from_bits)]
-    /// # #[cfg(not(miri))] { // doctest does not work with strict provenance
-    /// use std::ptr::NonNull;
-    /// let dangling: *mut u8 = NonNull::dangling().as_ptr();
-    /// assert_eq!(<*mut u8>::from_bits(1), dangling);
-    /// }
-    /// ```
-    #[unstable(feature = "ptr_to_from_bits", issue = "91126")]
-    #[deprecated(
-        since = "1.67.0",
-        note = "replaced by the `ptr::with_exposed_provenance_mut` function, or \
-            update your code to follow the strict provenance rules using its APIs"
-    )]
-    #[allow(fuzzy_provenance_casts)] // this is an unstable and semi-deprecated cast function
-    #[inline(always)]
-    pub fn from_bits(bits: usize) -> Self
-    where
-        T: Sized,
-    {
-        bits as Self
-    }
-
     /// Gets the "address" portion of the pointer.
     ///
     /// This is similar to `self as usize`, which semantically discards *provenance* and
     /// *address-space* information. However, unlike `self as usize`, casting the returned address
-    /// back to a pointer yields yields a [pointer without provenance][without_provenance_mut], which is undefined
+    /// back to a pointer yields a [pointer without provenance][without_provenance_mut], which is undefined
     /// behavior to dereference. To properly restore the lost information and obtain a
     /// dereferenceable pointer, use [`with_addr`][pointer::with_addr] or
     /// [`map_addr`][pointer::map_addr].
@@ -367,6 +301,57 @@ impl<T: ?Sized> *mut T {
         if self.is_null() { None } else { unsafe { Some(&*self) } }
     }
 
+    /// Returns a shared reference to the value behind the pointer.
+    /// If the pointer may be null or the value may be uninitialized, [`as_uninit_ref`] must be used instead.
+    /// If the pointer may be null, but the value is known to have been initialized, [`as_ref`] must be used instead.
+    ///
+    /// For the mutable counterpart see [`as_mut_unchecked`].
+    ///
+    /// [`as_ref`]: #method.as_ref
+    /// [`as_uninit_ref`]: #method.as_uninit_ref
+    /// [`as_mut_unchecked`]: #method.as_mut_unchecked
+    ///
+    /// # Safety
+    ///
+    /// When calling this method, you have to ensure that all of the following is true:
+    ///
+    /// * The pointer must be properly aligned.
+    ///
+    /// * It must be "dereferenceable" in the sense defined in [the module documentation].
+    ///
+    /// * The pointer must point to an initialized instance of `T`.
+    ///
+    /// * You must enforce Rust's aliasing rules, since the returned lifetime `'a` is
+    ///   arbitrarily chosen and does not necessarily reflect the actual lifetime of the data.
+    ///   In particular, while this reference exists, the memory the pointer points to must
+    ///   not get mutated (except inside `UnsafeCell`).
+    ///
+    /// This applies even if the result of this method is unused!
+    /// (The part about being initialized is not yet fully decided, but until
+    /// it is, the only safe approach is to ensure that they are indeed initialized.)
+    ///
+    /// [the module documentation]: crate::ptr#safety
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(ptr_as_ref_unchecked)]
+    /// let ptr: *mut u8 = &mut 10u8 as *mut u8;
+    ///
+    /// unsafe {
+    ///     println!("We got back the value: {}!", ptr.as_ref_unchecked());
+    /// }
+    /// ```
+    // FIXME: mention it in the docs for `as_ref` and `as_uninit_ref` once stabilized.
+    #[unstable(feature = "ptr_as_ref_unchecked", issue = "122034")]
+    #[rustc_const_unstable(feature = "const_ptr_as_ref", issue = "91822")]
+    #[inline]
+    #[must_use]
+    pub const unsafe fn as_ref_unchecked<'a>(self) -> &'a T {
+        // SAFETY: the caller must guarantee that `self` is valid for a reference
+        unsafe { &*self }
+    }
+
     /// Returns `None` if the pointer is null, or else returns a shared reference to
     /// the value wrapped in `Some`. In contrast to [`as_ref`], this does not require
     /// that the value has to be initialized.
@@ -429,8 +414,9 @@ impl<T: ?Sized> *mut T {
     /// If any of the following conditions are violated, the result is Undefined
     /// Behavior:
     ///
-    /// * Both the starting and resulting pointer must be either in bounds or one
-    ///   byte past the end of the same [allocated object].
+    /// * If the computed offset, **in bytes**, is non-zero, then both the starting and resulting
+    ///   pointer must be either in bounds or at the end of the same [allocated object].
+    ///   (If it is zero, then the function is always well-defined.)
     ///
     /// * The computed offset, **in bytes**, cannot overflow an `isize`.
     ///
@@ -688,6 +674,58 @@ impl<T: ?Sized> *mut T {
         if self.is_null() { None } else { unsafe { Some(&mut *self) } }
     }
 
+    /// Returns a unique reference to the value behind the pointer.
+    /// If the pointer may be null or the value may be uninitialized, [`as_uninit_mut`] must be used instead.
+    /// If the pointer may be null, but the value is known to have been initialized, [`as_mut`] must be used instead.
+    ///
+    /// For the shared counterpart see [`as_ref_unchecked`].
+    ///
+    /// [`as_mut`]: #method.as_mut
+    /// [`as_uninit_mut`]: #method.as_uninit_mut
+    /// [`as_ref_unchecked`]: #method.as_mut_unchecked
+    ///
+    /// # Safety
+    ///
+    /// When calling this method, you have to ensure that all of the following is true:
+    ///
+    /// * The pointer must be properly aligned.
+    ///
+    /// * It must be "dereferenceable" in the sense defined in [the module documentation].
+    ///
+    /// * The pointer must point to an initialized instance of `T`.
+    ///
+    /// * You must enforce Rust's aliasing rules, since the returned lifetime `'a` is
+    ///   arbitrarily chosen and does not necessarily reflect the actual lifetime of the data.
+    ///   In particular, while this reference exists, the memory the pointer points to must
+    ///   not get mutated (except inside `UnsafeCell`).
+    ///
+    /// This applies even if the result of this method is unused!
+    /// (The part about being initialized is not yet fully decided, but until
+    /// it is, the only safe approach is to ensure that they are indeed initialized.)
+    ///
+    /// [the module documentation]: crate::ptr#safety
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(ptr_as_ref_unchecked)]
+    /// let mut s = [1, 2, 3];
+    /// let ptr: *mut u32 = s.as_mut_ptr();
+    /// let first_value = unsafe { ptr.as_mut_unchecked() };
+    /// *first_value = 4;
+    /// # assert_eq!(s, [4, 2, 3]);
+    /// println!("{s:?}"); // It'll print: "[4, 2, 3]".
+    /// ```
+    // FIXME: mention it in the docs for `as_mut` and `as_uninit_mut` once stabilized.
+    #[unstable(feature = "ptr_as_ref_unchecked", issue = "122034")]
+    #[rustc_const_unstable(feature = "const_ptr_as_ref", issue = "91822")]
+    #[inline]
+    #[must_use]
+    pub const unsafe fn as_mut_unchecked<'a>(self) -> &'a mut T {
+        // SAFETY: the caller must guarantee that `self` is valid for a reference
+        unsafe { &mut *self }
+    }
+
     /// Returns `None` if the pointer is null, or else returns a unique reference to
     /// the value wrapped in `Some`. In contrast to [`as_mut`], this does not require
     /// that the value has to be initialized.
@@ -801,11 +839,11 @@ impl<T: ?Sized> *mut T {
     /// If any of the following conditions are violated, the result is Undefined
     /// Behavior:
     ///
-    /// * Both `self` and `origin` must be either in bounds or one
-    ///   byte past the end of the same [allocated object].
+    /// * `self` and `origin` must either
     ///
-    /// * Both pointers must be *derived from* a pointer to the same object.
-    ///   (See below for an example.)
+    ///   * both be *derived from* a pointer to the same [allocated object], and the memory range between
+    ///     the two pointers must be either empty or in bounds of that object. (See below for an example.)
+    ///   * or both be derived from an integer literal/constant, and point to the same address.
     ///
     /// * The distance between the pointers, in bytes, must be an exact multiple
     ///   of the size of `T`.
@@ -992,8 +1030,9 @@ impl<T: ?Sized> *mut T {
     /// If any of the following conditions are violated, the result is Undefined
     /// Behavior:
     ///
-    /// * Both the starting and resulting pointer must be either in bounds or one
-    ///   byte past the end of the same [allocated object].
+    /// * If the computed offset, **in bytes**, is non-zero, then both the starting and resulting
+    ///   pointer must be either in bounds or at the end of the same [allocated object].
+    ///   (If it is zero, then the function is always well-defined.)
     ///
     /// * The computed offset, **in bytes**, cannot overflow an `isize`.
     ///
@@ -1076,8 +1115,9 @@ impl<T: ?Sized> *mut T {
     /// If any of the following conditions are violated, the result is Undefined
     /// Behavior:
     ///
-    /// * Both the starting and resulting pointer must be either in bounds or one
-    ///   byte past the end of the same [allocated object].
+    /// * If the computed offset, **in bytes**, is non-zero, then both the starting and resulting
+    ///   pointer must be either in bounds or at the end of the same [allocated object].
+    ///   (If it is zero, then the function is always well-defined.)
     ///
     /// * The computed offset cannot exceed `isize::MAX` **bytes**.
     ///
@@ -1118,6 +1158,7 @@ impl<T: ?Sized> *mut T {
     #[stable(feature = "pointer_methods", since = "1.26.0")]
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[rustc_const_stable(feature = "const_ptr_offset", since = "1.61.0")]
+    #[rustc_allow_const_fn_unstable(unchecked_neg)]
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     pub const unsafe fn sub(self, count: usize) -> Self
@@ -1131,7 +1172,7 @@ impl<T: ?Sized> *mut T {
             // SAFETY: the caller must uphold the safety contract for `offset`.
             // Because the pointee is *not* a ZST, that means that `count` is
             // at most `isize::MAX`, and thus the negation cannot overflow.
-            unsafe { self.offset(intrinsics::unchecked_sub(0, count as isize)) }
+            unsafe { self.offset((count as isize).unchecked_neg()) }
         }
     }
 
@@ -1756,7 +1797,7 @@ impl<T: ?Sized> *mut T {
     /// [tracking issue]: https://github.com/rust-lang/rust/issues/104203
     #[must_use]
     #[inline]
-    #[stable(feature = "pointer_is_aligned", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "pointer_is_aligned", since = "1.79.0")]
     #[rustc_const_unstable(feature = "const_pointer_is_aligned", issue = "104203")]
     pub const fn is_aligned(self) -> bool
     where
@@ -1915,8 +1956,8 @@ impl<T> *mut [T] {
     /// assert_eq!(slice.len(), 3);
     /// ```
     #[inline(always)]
-    #[stable(feature = "slice_ptr_len", since = "CURRENT_RUSTC_VERSION")]
-    #[rustc_const_stable(feature = "const_slice_ptr_len", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "slice_ptr_len", since = "1.79.0")]
+    #[rustc_const_stable(feature = "const_slice_ptr_len", since = "1.79.0")]
     #[rustc_allow_const_fn_unstable(ptr_metadata)]
     pub const fn len(self) -> usize {
         metadata(self)
@@ -1933,8 +1974,8 @@ impl<T> *mut [T] {
     /// assert!(!slice.is_empty());
     /// ```
     #[inline(always)]
-    #[stable(feature = "slice_ptr_len", since = "CURRENT_RUSTC_VERSION")]
-    #[rustc_const_stable(feature = "const_slice_ptr_len", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "slice_ptr_len", since = "1.79.0")]
+    #[rustc_const_stable(feature = "const_slice_ptr_len", since = "1.79.0")]
     pub const fn is_empty(self) -> bool {
         self.len() == 0
     }

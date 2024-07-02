@@ -1,5 +1,5 @@
 use std::env;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io::ErrorKind;
 
 use rustc_data_structures::fx::FxHashMap;
@@ -9,7 +9,7 @@ use helpers::windows_check_buffer_size;
 
 #[derive(Default)]
 pub struct WindowsEnvVars {
-    /// Stores the environment varialbles.
+    /// Stores the environment variables.
     map: FxHashMap<OsString, OsString>,
 }
 
@@ -20,23 +20,28 @@ impl VisitProvenance for WindowsEnvVars {
 }
 
 impl WindowsEnvVars {
-    pub(crate) fn new<'mir, 'tcx>(
-        _ecx: &mut InterpCx<'mir, 'tcx, MiriMachine<'mir, 'tcx>>,
+    pub(crate) fn new<'tcx>(
+        _ecx: &mut InterpCx<'tcx, MiriMachine<'tcx>>,
         env_vars: FxHashMap<OsString, OsString>,
     ) -> InterpResult<'tcx, Self> {
         Ok(Self { map: env_vars })
     }
+
+    /// Implementation detail for [`InterpCx::get_env_var`].
+    pub(crate) fn get<'tcx>(&self, name: &OsStr) -> InterpResult<'tcx, Option<OsString>> {
+        Ok(self.map.get(name).cloned())
+    }
 }
 
-impl<'mir, 'tcx: 'mir> EvalContextExt<'mir, 'tcx> for crate::MiriInterpCx<'mir, 'tcx> {}
-pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
+impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
+pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     #[allow(non_snake_case)]
     fn GetEnvironmentVariableW(
         &mut self,
-        name_op: &OpTy<'tcx, Provenance>, // LPCWSTR
-        buf_op: &OpTy<'tcx, Provenance>,  // LPWSTR
-        size_op: &OpTy<'tcx, Provenance>, // DWORD
-    ) -> InterpResult<'tcx, Scalar<Provenance>> {
+        name_op: &OpTy<'tcx>, // LPCWSTR
+        buf_op: &OpTy<'tcx>,  // LPWSTR
+        size_op: &OpTy<'tcx>, // DWORD
+    ) -> InterpResult<'tcx, Scalar> {
         // ^ Returns DWORD (u32 on Windows)
 
         let this = self.eval_context_mut();
@@ -66,7 +71,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
     }
 
     #[allow(non_snake_case)]
-    fn GetEnvironmentStringsW(&mut self) -> InterpResult<'tcx, Pointer<Option<Provenance>>> {
+    fn GetEnvironmentStringsW(&mut self) -> InterpResult<'tcx, Pointer> {
         let this = self.eval_context_mut();
         this.assert_target_os("windows", "GetEnvironmentStringsW");
 
@@ -88,10 +93,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
     }
 
     #[allow(non_snake_case)]
-    fn FreeEnvironmentStringsW(
-        &mut self,
-        env_block_op: &OpTy<'tcx, Provenance>,
-    ) -> InterpResult<'tcx, Scalar<Provenance>> {
+    fn FreeEnvironmentStringsW(&mut self, env_block_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
         this.assert_target_os("windows", "FreeEnvironmentStringsW");
 
@@ -104,9 +106,9 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
     #[allow(non_snake_case)]
     fn SetEnvironmentVariableW(
         &mut self,
-        name_op: &OpTy<'tcx, Provenance>,  // LPCWSTR
-        value_op: &OpTy<'tcx, Provenance>, // LPCWSTR
-    ) -> InterpResult<'tcx, Scalar<Provenance>> {
+        name_op: &OpTy<'tcx>,  // LPCWSTR
+        value_op: &OpTy<'tcx>, // LPCWSTR
+    ) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
         this.assert_target_os("windows", "SetEnvironmentVariableW");
 
@@ -137,9 +139,9 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
     #[allow(non_snake_case)]
     fn GetCurrentDirectoryW(
         &mut self,
-        size_op: &OpTy<'tcx, Provenance>, // DWORD
-        buf_op: &OpTy<'tcx, Provenance>,  // LPTSTR
-    ) -> InterpResult<'tcx, Scalar<Provenance>> {
+        size_op: &OpTy<'tcx>, // DWORD
+        buf_op: &OpTy<'tcx>,  // LPTSTR
+    ) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
         this.assert_target_os("windows", "GetCurrentDirectoryW");
 
@@ -148,7 +150,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
 
         if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
             this.reject_in_isolation("`GetCurrentDirectoryW`", reject_with)?;
-            this.set_last_error_from_io_error(ErrorKind::PermissionDenied)?;
+            this.set_last_error_from_io_error(ErrorKind::PermissionDenied.into())?;
             return Ok(Scalar::from_u32(0));
         }
 
@@ -161,7 +163,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                     this.write_path_to_wide_str(&cwd, buf, size)?,
                 )));
             }
-            Err(e) => this.set_last_error_from_io_error(e.kind())?,
+            Err(e) => this.set_last_error_from_io_error(e)?,
         }
         Ok(Scalar::from_u32(0))
     }
@@ -169,8 +171,8 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
     #[allow(non_snake_case)]
     fn SetCurrentDirectoryW(
         &mut self,
-        path_op: &OpTy<'tcx, Provenance>, // LPCTSTR
-    ) -> InterpResult<'tcx, Scalar<Provenance>> {
+        path_op: &OpTy<'tcx>, // LPCTSTR
+    ) -> InterpResult<'tcx, Scalar> {
         // ^ Returns BOOL (i32 on Windows)
 
         let this = self.eval_context_mut();
@@ -180,7 +182,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
 
         if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
             this.reject_in_isolation("`SetCurrentDirectoryW`", reject_with)?;
-            this.set_last_error_from_io_error(ErrorKind::PermissionDenied)?;
+            this.set_last_error_from_io_error(ErrorKind::PermissionDenied.into())?;
 
             return Ok(this.eval_windows("c", "FALSE"));
         }
@@ -188,7 +190,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
         match env::set_current_dir(path) {
             Ok(()) => Ok(this.eval_windows("c", "TRUE")),
             Err(e) => {
-                this.set_last_error_from_io_error(e.kind())?;
+                this.set_last_error_from_io_error(e)?;
                 Ok(this.eval_windows("c", "FALSE"))
             }
         }
@@ -206,10 +208,10 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
     #[allow(non_snake_case)]
     fn GetUserProfileDirectoryW(
         &mut self,
-        token: &OpTy<'tcx, Provenance>, // HANDLE
-        buf: &OpTy<'tcx, Provenance>,   // LPWSTR
-        size: &OpTy<'tcx, Provenance>,  // LPDWORD
-    ) -> InterpResult<'tcx, Scalar<Provenance>> // returns BOOL
+        token: &OpTy<'tcx>, // HANDLE
+        buf: &OpTy<'tcx>,   // LPWSTR
+        size: &OpTy<'tcx>,  // LPDWORD
+    ) -> InterpResult<'tcx, Scalar> // returns BOOL
     {
         let this = self.eval_context_mut();
         this.assert_target_os("windows", "GetUserProfileDirectoryW");

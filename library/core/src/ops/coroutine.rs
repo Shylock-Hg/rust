@@ -46,7 +46,7 @@ pub enum CoroutineState<Y, R> {
 /// use std::pin::Pin;
 ///
 /// fn main() {
-///     let mut coroutine = #[cfg_attr(not(bootstrap), coroutine)] || {
+///     let mut coroutine = #[coroutine] || {
 ///         yield 1;
 ///         "foo"
 ///     };
@@ -76,6 +76,7 @@ pub trait Coroutine<R = ()> {
     /// values which are allowed to be returned each time a coroutine yields.
     /// For example an iterator-as-a-coroutine would likely have this type as
     /// `T`, the type being iterated over.
+    #[cfg_attr(not(bootstrap), lang = "coroutine_yield")]
     type Yield;
 
     /// The type of value this coroutine returns.
@@ -84,6 +85,7 @@ pub trait Coroutine<R = ()> {
     /// `return` statement or implicitly as the last expression of a coroutine
     /// literal. For example futures would use this as `Result<T, E>` as it
     /// represents a completed future.
+    #[cfg_attr(not(bootstrap), lang = "coroutine_return")]
     type Return;
 
     /// Resumes the execution of this coroutine.

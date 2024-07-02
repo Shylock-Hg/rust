@@ -42,12 +42,13 @@ pub enum TerminationInfo {
     },
     DataRace {
         involves_non_atomic: bool,
-        ptr: Pointer<AllocId>,
+        ptr: interpret::Pointer<AllocId>,
         op1: RacingOp,
         op2: RacingOp,
         extra: Option<&'static str>,
         retag_explain: bool,
     },
+    UnsupportedForeignItem(String),
 }
 
 pub struct RacingOp {
@@ -85,6 +86,7 @@ impl fmt::Display for TerminationInfo {
                     op2.action,
                     op2.thread_info
                 ),
+            UnsupportedForeignItem(msg) => write!(f, "{msg}"),
         }
     }
 }
@@ -126,7 +128,7 @@ pub enum NonHaltingDiagnostic {
         details: bool,
     },
     WeakMemoryOutdatedLoad {
-        ptr: Pointer<Option<Provenance>>,
+        ptr: Pointer,
     },
 }
 
@@ -142,7 +144,7 @@ pub enum DiagLevel {
 /// be pointing to a problem in the Rust runtime itself, and do not prune it at all.
 pub fn prune_stacktrace<'tcx>(
     mut stacktrace: Vec<FrameInfo<'tcx>>,
-    machine: &MiriMachine<'_, 'tcx>,
+    machine: &MiriMachine<'tcx>,
 ) -> (Vec<FrameInfo<'tcx>>, bool) {
     match machine.backtrace_style {
         BacktraceStyle::Off => {
@@ -199,8 +201,8 @@ pub fn prune_stacktrace<'tcx>(
 /// Emit a custom diagnostic without going through the miri-engine machinery.
 ///
 /// Returns `Some` if this was regular program termination with a given exit code and a `bool` indicating whether a leak check should happen; `None` otherwise.
-pub fn report_error<'tcx, 'mir>(
-    ecx: &InterpCx<'mir, 'tcx, MiriMachine<'mir, 'tcx>>,
+pub fn report_error<'tcx>(
+    ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
     e: InterpErrorInfo<'tcx>,
 ) -> Option<(i64, bool)> {
     use InterpError::*;
@@ -214,7 +216,7 @@ pub fn report_error<'tcx, 'mir>(
         let title = match info {
             Exit { code, leak_check } => return Some((*code, *leak_check)),
             Abort(_) => Some("abnormal termination"),
-            UnsupportedInIsolation(_) | Int2PtrWithStrictProvenance =>
+            UnsupportedInIsolation(_) | Int2PtrWithStrictProvenance | UnsupportedForeignItem(_) =>
                 Some("unsupported operation"),
             StackedBorrowsUb { .. } | TreeBorrowsUb { .. } | DataRace { .. } =>
                 Some("Undefined Behavior"),
@@ -225,9 +227,15 @@ pub fn report_error<'tcx, 'mir>(
         let helps = match info {
             UnsupportedInIsolation(_) =>
                 vec![
-                    (None, format!("pass the flag `-Zmiri-disable-isolation` to disable isolation;")),
-                    (None, format!("or pass `-Zmiri-isolation-error=warn` to configure Miri to return an error code from isolated operations (if supported for that operation) and continue with a warning")),
+                    (None, format!("set `MIRIFLAGS=-Zmiri-disable-isolation` to disable isolation;")),
+                    (None, format!("or set `MIRIFLAGS=-Zmiri-isolation-error=warn` to make Miri return an error code from isolated operations (if supported for that operation) and continue with a warning")),
                 ],
+            UnsupportedForeignItem(_) => {
+                vec![
+                    (None, format!("if this is a basic API commonly used on this target, please report an issue with Miri")),
+                    (None, format!("however, note that Miri does not aim to support every FFI function out there; for instance, we will not support APIs for things such as GUIs, scripting languages, or databases")),
+                ]
+            }
             StackedBorrowsUb { help, history, .. } => {
                 msg.extend(help.clone());
                 let mut helps = vec![
@@ -303,7 +311,9 @@ pub fn report_error<'tcx, 'mir>(
             ResourceExhaustion(_) => "resource exhaustion",
             Unsupported(
                 // We list only the ones that can actually happen.
-                UnsupportedOpInfo::Unsupported(_) | UnsupportedOpInfo::UnsizedLocal,
+                UnsupportedOpInfo::Unsupported(_)
+                | UnsupportedOpInfo::UnsizedLocal
+                | UnsupportedOpInfo::ExternTypeField,
             ) => "unsupported operation",
             InvalidProgram(
                 // We list only the ones that can actually happen.
@@ -320,7 +330,9 @@ pub fn report_error<'tcx, 'mir>(
         #[rustfmt::skip]
         let helps = match e.kind() {
             Unsupported(_) =>
-                vec![(None, format!("this is likely not a bug in the program; it indicates that the program performed an operation that the interpreter does not support"))],
+                vec![
+                    (None, format!("this is likely not a bug in the program; it indicates that the program performed an operation that Miri does not support")),
+                ],
             UndefinedBehavior(AlignmentCheckFailed { .. })
                 if ecx.machine.check_alignment == AlignmentCheck::Symbolic
             =>
@@ -344,7 +356,7 @@ pub fn report_error<'tcx, 'mir>(
                     }
                     AbiMismatchArgument { .. } | AbiMismatchReturn { .. } => {
                         helps.push((None, format!("this means these two types are not *guaranteed* to be ABI-compatible across all targets")));
-                        helps.push((None, format!("if you think this code should be accepted anyway, please report an issue")));
+                        helps.push((None, format!("if you think this code should be accepted anyway, please report an issue with Miri")));
                     }
                     _ => {},
                 }
@@ -401,7 +413,7 @@ pub fn report_error<'tcx, 'mir>(
         vec![],
         helps,
         &stacktrace,
-        Some(ecx.get_active_thread()),
+        Some(ecx.active_thread()),
         &ecx.machine,
     );
 
@@ -409,7 +421,7 @@ pub fn report_error<'tcx, 'mir>(
 
     if show_all_threads {
         for (thread, stack) in ecx.machine.threads.all_stacks() {
-            if thread != ecx.get_active_thread() {
+            if thread != ecx.active_thread() {
                 let stacktrace = Frame::generate_stacktrace_from_stack(stack);
                 let (stacktrace, was_pruned) = prune_stacktrace(stacktrace, &ecx.machine);
                 any_pruned |= was_pruned;
@@ -447,25 +459,28 @@ pub fn report_error<'tcx, 'mir>(
     None
 }
 
-pub fn report_leaks<'mir, 'tcx>(
-    ecx: &InterpCx<'mir, 'tcx, MiriMachine<'mir, 'tcx>>,
-    leaks: Vec<(AllocId, MemoryKind, Allocation<Provenance, AllocExtra<'tcx>>)>,
+pub fn report_leaks<'tcx>(
+    ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
+    leaks: Vec<(AllocId, MemoryKind, Allocation<Provenance, AllocExtra<'tcx>, MiriAllocBytes>)>,
 ) {
     let mut any_pruned = false;
     for (id, kind, mut alloc) in leaks {
+        let mut title = format!(
+            "memory leaked: {id:?} ({}, size: {:?}, align: {:?})",
+            kind,
+            alloc.size().bytes(),
+            alloc.align.bytes()
+        );
         let Some(backtrace) = alloc.extra.backtrace.take() else {
+            ecx.tcx.dcx().err(title);
             continue;
         };
+        title.push_str(", allocated here:");
         let (backtrace, pruned) = prune_stacktrace(backtrace, &ecx.machine);
         any_pruned |= pruned;
         report_msg(
             DiagLevel::Error,
-            format!(
-                "memory leaked: {id:?} ({}, size: {:?}, align: {:?}), allocated here:",
-                kind,
-                alloc.size().bytes(),
-                alloc.align.bytes()
-            ),
+            title,
             vec![],
             vec![],
             vec![],
@@ -494,7 +509,7 @@ pub fn report_msg<'tcx>(
     helps: Vec<(Option<SpanData>, String)>,
     stacktrace: &[FrameInfo<'tcx>],
     thread: Option<ThreadId>,
-    machine: &MiriMachine<'_, 'tcx>,
+    machine: &MiriMachine<'tcx>,
 ) {
     let span = stacktrace.first().map_or(DUMMY_SP, |fi| fi.span);
     let sess = machine.tcx.sess;
@@ -556,7 +571,7 @@ pub fn report_msg<'tcx>(
         let is_local = machine.is_local(frame_info);
         // No span for non-local frames and the first frame (which is the error site).
         if is_local && idx > 0 {
-            err.subdiagnostic(err.dcx, frame_info.as_note(machine.tcx));
+            err.subdiagnostic(frame_info.as_note(machine.tcx));
         } else {
             let sm = sess.source_map();
             let span = sm.span_to_embeddable_string(frame_info.span);
@@ -567,7 +582,7 @@ pub fn report_msg<'tcx>(
     err.emit();
 }
 
-impl<'mir, 'tcx> MiriMachine<'mir, 'tcx> {
+impl<'tcx> MiriMachine<'tcx> {
     pub fn emit_diagnostic(&self, e: NonHaltingDiagnostic) {
         use NonHaltingDiagnostic::*;
 
@@ -632,12 +647,8 @@ impl<'mir, 'tcx> MiriMachine<'mir, 'tcx> {
                     (
                         None,
                         format!(
-                            "This program is using integer-to-pointer casts or (equivalently) `ptr::with_exposed_provenance`,"
+                            "This program is using integer-to-pointer casts or (equivalently) `ptr::with_exposed_provenance`, which means that Miri might miss pointer bugs in this program."
                         ),
-                    ),
-                    (
-                        None,
-                        format!("which means that Miri might miss pointer bugs in this program."),
                     ),
                     (
                         None,
@@ -654,13 +665,13 @@ impl<'mir, 'tcx> MiriMachine<'mir, 'tcx> {
                     (
                         None,
                         format!(
-                            "You can then pass the `-Zmiri-strict-provenance` flag to Miri, to ensure you are not relying on `with_exposed_provenance` semantics."
+                            "You can then set `MIRIFLAGS=-Zmiri-strict-provenance` to ensure you are not relying on `with_exposed_provenance` semantics."
                         ),
                     ),
                     (
                         None,
                         format!(
-                            "Alternatively, the `-Zmiri-permissive-provenance` flag disables this warning."
+                            "Alternatively, `MIRIFLAGS=-Zmiri-permissive-provenance` disables this warning."
                         ),
                     ),
                 ],
@@ -674,14 +685,14 @@ impl<'mir, 'tcx> MiriMachine<'mir, 'tcx> {
             notes,
             helps,
             &stacktrace,
-            Some(self.threads.get_active_thread_id()),
+            Some(self.threads.active_thread()),
             self,
         );
     }
 }
 
-impl<'mir, 'tcx: 'mir> EvalContextExt<'mir, 'tcx> for crate::MiriInterpCx<'mir, 'tcx> {}
-pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
+impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
+pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn emit_diagnostic(&self, e: NonHaltingDiagnostic) {
         let this = self.eval_context_ref();
         this.machine.emit_diagnostic(e);
@@ -702,7 +713,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
             vec![],
             vec![],
             &stacktrace,
-            Some(this.get_active_thread()),
+            Some(this.active_thread()),
             &this.machine,
         );
     }

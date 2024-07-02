@@ -368,6 +368,8 @@ pub struct NeverPatternWithGuard {
 pub struct ArbitraryExpressionInPattern {
     #[primary_span]
     pub span: Span,
+    #[note(ast_lowering_pattern_from_macro_note)]
+    pub pattern_from_macro_note: bool,
 }
 
 #[derive(Diagnostic)]
@@ -418,6 +420,14 @@ pub(crate) struct AsyncBoundOnlyForFnTraits {
 #[derive(Diagnostic)]
 #[diag(ast_lowering_no_precise_captures_on_apit)]
 pub(crate) struct NoPreciseCapturesOnApit {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(ast_lowering_no_precise_captures_on_rpitit)]
+#[note]
+pub(crate) struct NoPreciseCapturesOnRpitit {
     #[primary_span]
     pub span: Span,
 }

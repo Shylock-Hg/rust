@@ -1,11 +1,10 @@
 //! This checks the output of some `--print` options when
 //! output to a file (instead of stdout)
 
-extern crate run_make_support;
-
 use std::ffi::OsString;
+use std::path::PathBuf;
 
-use run_make_support::{rustc, target, tmp_dir};
+use run_make_support::{fs_wrapper, rustc, target};
 
 struct Option<'a> {
     target: &'a str,
@@ -15,11 +14,7 @@ struct Option<'a> {
 
 fn main() {
     // Printed from CodegenBackend trait impl in rustc_codegen_llvm/src/lib.rs
-    check(Option {
-        target: &target(),
-        option: "relocation-models",
-        includes: &["dynamic-no-pic"],
-    });
+    check(Option { target: &target(), option: "relocation-models", includes: &["dynamic-no-pic"] });
 
     // Printed by compiler/rustc_codegen_llvm/src/llvm_util.rs
     check(Option {
@@ -44,21 +39,17 @@ fn check(args: Option) {
     }
 
     // --print={option}
-    let stdout = {
-        let output = rustc().target(args.target).print(args.option).run();
-
-        String::from_utf8(output.stdout).unwrap()
-    };
+    let stdout = rustc().target(args.target).print(args.option).run().stdout_utf8();
 
     // --print={option}=PATH
     let output = {
-        let tmp_path = tmp_dir().join(format!("{}.txt", args.option));
+        let tmp_path = PathBuf::from(format!("{}.txt", args.option));
         let mut print_arg = OsString::from(format!("--print={}=", args.option));
         print_arg.push(tmp_path.as_os_str());
 
-        let _output = rustc().target(args.target).arg(print_arg).run();
+        rustc().target(args.target).arg(print_arg).run();
 
-        std::fs::read_to_string(&tmp_path).unwrap()
+        fs_wrapper::read_to_string(&tmp_path)
     };
 
     check_(&stdout, args.includes);

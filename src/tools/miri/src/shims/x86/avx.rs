@@ -11,19 +11,16 @@ use super::{
     FloatBinOp, FloatUnaryOp,
 };
 use crate::*;
-use shims::foreign_items::EmulateForeignItemResult;
 
-impl<'mir, 'tcx: 'mir> EvalContextExt<'mir, 'tcx> for crate::MiriInterpCx<'mir, 'tcx> {}
-pub(super) trait EvalContextExt<'mir, 'tcx: 'mir>:
-    crate::MiriInterpCxExt<'mir, 'tcx>
-{
+impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
+pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn emulate_x86_avx_intrinsic(
         &mut self,
         link_name: Symbol,
         abi: Abi,
-        args: &[OpTy<'tcx, Provenance>],
-        dest: &MPlaceTy<'tcx, Provenance>,
-    ) -> InterpResult<'tcx, EmulateForeignItemResult> {
+        args: &[OpTy<'tcx>],
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx, EmulateItemResult> {
         let this = self.eval_context_mut();
         this.expect_target_feature_for_intrinsic(link_name, "avx")?;
         // Prefix should have already been checked.
@@ -179,8 +176,7 @@ pub(super) trait EvalContextExt<'mir, 'tcx: 'mir>:
                     // of 4.
                     let chunk_base = i & !0b11;
                     let src_i = u64::from(this.read_scalar(&control)?.to_u32()? & 0b11)
-                        .checked_add(chunk_base)
-                        .unwrap();
+                        .strict_add(chunk_base);
 
                     this.copy_op(
                         &this.project_index(&data, src_i)?,
@@ -213,9 +209,8 @@ pub(super) trait EvalContextExt<'mir, 'tcx: 'mir>:
                     // second instead of the first, ask Intel). To read the value from the current
                     // chunk, add the destination index truncated to a multiple of 2.
                     let chunk_base = i & !1;
-                    let src_i = ((this.read_scalar(&control)?.to_u64()? >> 1) & 1)
-                        .checked_add(chunk_base)
-                        .unwrap();
+                    let src_i =
+                        ((this.read_scalar(&control)?.to_u64()? >> 1) & 1).strict_add(chunk_base);
 
                     this.copy_op(
                         &this.project_index(&data, src_i)?,
@@ -343,8 +338,8 @@ pub(super) trait EvalContextExt<'mir, 'tcx: 'mir>:
 
                 this.write_scalar(Scalar::from_i32(res.into()), dest)?;
             }
-            _ => return Ok(EmulateForeignItemResult::NotSupported),
+            _ => return Ok(EmulateItemResult::NotSupported),
         }
-        Ok(EmulateForeignItemResult::NeedsJumping)
+        Ok(EmulateItemResult::NeedsReturn)
     }
 }

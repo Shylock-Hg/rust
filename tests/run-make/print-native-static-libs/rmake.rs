@@ -12,19 +12,13 @@
 //@ ignore-cross-compile
 //@ ignore-wasm
 
-extern crate run_make_support;
-
 use std::io::BufRead;
 
-use run_make_support::{rustc, is_msvc};
+use run_make_support::{is_msvc, rustc};
 
 fn main() {
     // build supporting crate
-    rustc()
-        .input("bar.rs")
-        .crate_type("rlib")
-        .arg("-lbar_cli")
-        .run();
+    rustc().input("bar.rs").crate_type("rlib").arg("-lbar_cli").run();
 
     // build main crate as staticlib
     let output = rustc()
@@ -36,10 +30,10 @@ fn main() {
         .run();
 
     let mut found_note = false;
-    for l in output.stderr.lines() {
-        let l = l.expect("utf-8 string");
-
-        let Some(args) = l.strip_prefix("note: native-static-libs:") else { continue; };
+    for l in output.stderr_utf8().lines() {
+        let Some(args) = l.strip_prefix("note: native-static-libs:") else {
+            continue;
+        };
         assert!(!found_note);
         found_note = true;
 
@@ -55,11 +49,11 @@ fn main() {
                 );
                 let found = $args.contains(&&*lib);
                 assert!(found, "unable to find lib `{}` in those linker args: {:?}", lib, $args);
-            }}
+            }};
         }
 
         assert_contains_lib!("glib-2.0" in args); // in bar.rs
-        assert_contains_lib!("systemd" in args);  // in foo.rs
+        assert_contains_lib!("systemd" in args); // in foo.rs
         assert_contains_lib!("bar_cli" in args);
         assert_contains_lib!("foo_cli" in args);
 

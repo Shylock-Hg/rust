@@ -6,7 +6,8 @@ use gccjit::{
 use rustc_codegen_ssa::base::wants_msvc_seh;
 use rustc_codegen_ssa::errors as ssa_errors;
 use rustc_codegen_ssa::traits::{BackendTypes, BaseTypeMethods, MiscMethods};
-use rustc_data_structures::base_n;
+use rustc_data_structures::base_n::ToBaseN;
+use rustc_data_structures::base_n::ALPHANUMERIC_ONLY;
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_middle::mir::mono::CodegenUnit;
 use rustc_middle::span_bug;
@@ -26,7 +27,6 @@ use crate::callee::get_fn;
 use crate::common::SignType;
 
 pub struct CodegenCx<'gcc, 'tcx> {
-    pub check_overflow: bool,
     pub codegen_unit: &'tcx CodegenUnit<'tcx>,
     pub context: &'gcc Context<'gcc>,
 
@@ -133,8 +133,6 @@ impl<'gcc, 'tcx> CodegenCx<'gcc, 'tcx> {
         tcx: TyCtxt<'tcx>,
         supports_128bit_integers: bool,
     ) -> Self {
-        let check_overflow = tcx.sess.overflow_checks();
-
         let create_type = |ctype, rust_type| {
             let layout = tcx.layout_of(ParamEnv::reveal_all().and(rust_type)).unwrap();
             let align = layout.align.abi.bytes();
@@ -270,7 +268,6 @@ impl<'gcc, 'tcx> CodegenCx<'gcc, 'tcx> {
         }
 
         let mut cx = Self {
-            check_overflow,
             codegen_unit,
             context,
             current_func: RefCell::new(None),
@@ -510,10 +507,6 @@ impl<'gcc, 'tcx> MiscMethods<'tcx> for CodegenCx<'gcc, 'tcx> {
         &self.tcx.sess
     }
 
-    fn check_overflow(&self) -> bool {
-        self.check_overflow
-    }
-
     fn codegen_unit(&self) -> &'tcx CodegenUnit<'tcx> {
         self.codegen_unit
     }
@@ -621,7 +614,7 @@ impl<'b, 'tcx> CodegenCx<'b, 'tcx> {
         let mut name = String::with_capacity(prefix.len() + 6);
         name.push_str(prefix);
         name.push_str(".");
-        base_n::push_str(idx as u128, base_n::ALPHANUMERIC_ONLY, &mut name);
+        name.push_str(&(idx as u64).to_base(ALPHANUMERIC_ONLY));
         name
     }
 }
