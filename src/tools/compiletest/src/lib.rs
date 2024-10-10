@@ -34,10 +34,10 @@ use test::ColorConfig;
 use tracing::*;
 use walkdir::WalkDir;
 
-use self::header::{make_test_description, EarlyProps};
+use self::header::{EarlyProps, make_test_description};
 use crate::common::{
-    expected_output_path, output_base_dir, output_relative_path, Config, Debugger, Mode, PassMode,
-    TestPaths, UI_EXTENSIONS,
+    Config, Debugger, Mode, PassMode, TestPaths, UI_EXTENSIONS, expected_output_path,
+    output_base_dir, output_relative_path,
 };
 use crate::header::HeadersCache;
 use crate::util::logv;
@@ -47,13 +47,12 @@ pub fn parse_config(args: Vec<String>) -> Config {
     opts.reqopt("", "compile-lib-path", "path to host shared libraries", "PATH")
         .reqopt("", "run-lib-path", "path to target shared libraries", "PATH")
         .reqopt("", "rustc-path", "path to rustc to use for compiling", "PATH")
+        .optopt("", "cargo-path", "path to cargo to use for compiling", "PATH")
         .optopt("", "rustdoc-path", "path to rustdoc to use for compiling", "PATH")
         .optopt("", "coverage-dump-path", "path to coverage-dump to use in tests", "PATH")
         .reqopt("", "python", "path to python to use for doc tests", "PATH")
         .optopt("", "jsondocck-path", "path to jsondocck to use for doc tests", "PATH")
         .optopt("", "jsondoclint-path", "path to jsondoclint to use for doc tests", "PATH")
-        .optopt("", "valgrind-path", "path to Valgrind executable for Valgrind tests", "PROGRAM")
-        .optflag("", "force-valgrind", "fail if Valgrind tests cannot be run under Valgrind")
         .optopt("", "run-clang-based-tests-with", "path to Clang executable", "PATH")
         .optopt("", "llvm-filecheck", "path to LLVM's FileCheck binary", "DIR")
         .reqopt("", "src-base", "directory to scan for test files", "PATH")
@@ -64,7 +63,7 @@ pub fn parse_config(args: Vec<String>) -> Config {
             "",
             "mode",
             "which sort of compile tests to run",
-            "run-pass-valgrind | pretty | debug-info | codegen | rustdoc \
+            "pretty | debug-info | codegen | rustdoc \
             | rustdoc-json | codegen-units | incremental | run-make | ui \
             | js-doc-test | mir-opt | assembly | crashes",
         )
@@ -82,6 +81,7 @@ pub fn parse_config(args: Vec<String>) -> Config {
         )
         .optopt("", "run", "whether to execute run-* tests", "auto | always | never")
         .optflag("", "ignored", "run tests marked as ignored")
+        .optflag("", "has-enzyme", "run tests that require enzyme")
         .optflag("", "with-debug-assertions", "whether to run tests with `ignore-debug` header")
         .optmulti(
             "",
@@ -153,7 +153,7 @@ pub fn parse_config(args: Vec<String>) -> Config {
         .optflag("", "force-rerun", "rerun tests even if the inputs are unchanged")
         .optflag("", "only-modified", "only run tests that result been modified")
         .optflag("", "nocapture", "")
-        .optflag("", "profiler-support", "is the profiler runtime enabled for this target")
+        .optflag("", "profiler-runtime", "is the profiler runtime enabled for this target")
         .optflag("h", "help", "show this message")
         .reqopt("", "channel", "current Rust channel", "CHANNEL")
         .optflag(
@@ -163,7 +163,13 @@ pub fn parse_config(args: Vec<String>) -> Config {
         )
         .optopt("", "edition", "default Rust edition", "EDITION")
         .reqopt("", "git-repository", "name of the git repository", "ORG/REPO")
-        .reqopt("", "nightly-branch", "name of the git branch for nightly", "BRANCH");
+        .reqopt("", "nightly-branch", "name of the git branch for nightly", "BRANCH")
+        .reqopt(
+            "",
+            "git-merge-commit-email",
+            "email address used for finding merge commits",
+            "EMAIL",
+        );
 
     let (argv0, args_) = args.split_first().unwrap();
     if args.len() == 1 || args[1] == "-h" || args[1] == "--help" {
@@ -226,6 +232,7 @@ pub fn parse_config(args: Vec<String>) -> Config {
         // Avoid spawning an external command when we know tidy won't be used.
         false
     };
+    let has_enzyme = matches.opt_present("has-enzyme");
     let filters = if mode == Mode::RunMake {
         matches
             .free
@@ -254,13 +261,12 @@ pub fn parse_config(args: Vec<String>) -> Config {
         compile_lib_path: make_absolute(opt_path(matches, "compile-lib-path")),
         run_lib_path: make_absolute(opt_path(matches, "run-lib-path")),
         rustc_path: opt_path(matches, "rustc-path"),
+        cargo_path: matches.opt_str("cargo-path").map(PathBuf::from),
         rustdoc_path: matches.opt_str("rustdoc-path").map(PathBuf::from),
         coverage_dump_path: matches.opt_str("coverage-dump-path").map(PathBuf::from),
         python: matches.opt_str("python").unwrap(),
         jsondocck_path: matches.opt_str("jsondocck-path"),
         jsondoclint_path: matches.opt_str("jsondoclint-path"),
-        valgrind_path: matches.opt_str("valgrind-path"),
-        force_valgrind: matches.opt_present("force-valgrind"),
         run_clang_based_tests_with: matches.opt_str("run-clang-based-tests-with"),
         llvm_filecheck: matches.opt_str("llvm-filecheck").map(PathBuf::from),
         llvm_bin_dir: matches.opt_str("llvm-bin-dir").map(PathBuf::from),
@@ -323,6 +329,7 @@ pub fn parse_config(args: Vec<String>) -> Config {
             .map(|s| s.parse().expect("invalid --compare-mode provided")),
         rustfix_coverage: matches.opt_present("rustfix-coverage"),
         has_tidy,
+        has_enzyme,
         channel: matches.opt_str("channel").unwrap(),
         git_hash: matches.opt_present("git-hash"),
         edition: matches.opt_str("edition"),
@@ -346,8 +353,9 @@ pub fn parse_config(args: Vec<String>) -> Config {
 
         git_repository: matches.opt_str("git-repository").unwrap(),
         nightly_branch: matches.opt_str("nightly-branch").unwrap(),
+        git_merge_commit_email: matches.opt_str("git-merge-commit-email").unwrap(),
 
-        profiler_support: matches.opt_present("profiler-support"),
+        profiler_runtime: matches.opt_present("profiler-runtime"),
     }
 }
 
@@ -357,6 +365,7 @@ pub fn log_config(config: &Config) {
     logv(c, format!("compile_lib_path: {:?}", config.compile_lib_path));
     logv(c, format!("run_lib_path: {:?}", config.run_lib_path));
     logv(c, format!("rustc_path: {:?}", config.rustc_path.display()));
+    logv(c, format!("cargo_path: {:?}", config.cargo_path));
     logv(c, format!("rustdoc_path: {:?}", config.rustdoc_path));
     logv(c, format!("src_base: {:?}", config.src_base.display()));
     logv(c, format!("build_base: {:?}", config.build_base.display()));
@@ -640,6 +649,12 @@ fn common_inputs_stamp(config: &Config) -> Stamp {
         stamp.add_path(&rust_src_dir.join("src/etc/htmldocck.py"));
     }
 
+    // Re-run coverage tests if the `coverage-dump` tool was modified,
+    // because its output format might have changed.
+    if let Some(coverage_dump_path) = &config.coverage_dump_path {
+        stamp.add_path(coverage_dump_path)
+    }
+
     stamp.add_dir(&rust_src_dir.join("src/tools/run-make-support"));
 
     // Compiletest itself.
@@ -808,8 +823,12 @@ fn make_test(
                 &config, cache, test_name, &test_path, src_file, revision, poisoned,
             );
             // Ignore tests that already run and are up to date with respect to inputs.
-            if !config.force_rerun {
-                desc.ignore |= is_up_to_date(&config, testpaths, &early_props, revision, inputs);
+            if !config.force_rerun
+                && is_up_to_date(&config, testpaths, &early_props, revision, inputs)
+            {
+                desc.ignore = true;
+                // Keep this in sync with the "up-to-date" message detected by bootstrap.
+                desc.ignore_message = Some("up-to-date");
             }
             test::TestDescAndFn {
                 desc,

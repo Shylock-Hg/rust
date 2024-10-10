@@ -138,7 +138,6 @@ target | std | notes
 [`aarch64-apple-ios`](platform-support/apple-ios.md) | ✓ | ARM64 iOS
 [`aarch64-apple-ios-macabi`](platform-support/apple-ios-macabi.md) | ✓ | Mac Catalyst on ARM64
 [`aarch64-apple-ios-sim`](platform-support/apple-ios.md) | ✓ | Apple iOS Simulator on ARM64
-`aarch64-fuchsia` | ✓ | Alias for `aarch64-unknown-fuchsia`
 [`aarch64-unknown-fuchsia`](platform-support/fuchsia.md) | ✓ | ARM64 Fuchsia
 [`aarch64-linux-android`](platform-support/android.md) | ✓ | ARM64 Android
 [`aarch64-pc-windows-gnullvm`](platform-support/pc-windows-gnullvm.md) | ✓ | ARM64 MinGW (Windows 10+), LLVM ABI
@@ -199,7 +198,6 @@ target | std | notes
 [`x86_64-apple-ios`](platform-support/apple-ios.md) | ✓ | 64-bit x86 iOS
 [`x86_64-apple-ios-macabi`](platform-support/apple-ios-macabi.md) | ✓ | Mac Catalyst on x86_64
 [`x86_64-fortanix-unknown-sgx`](platform-support/x86_64-fortanix-unknown-sgx.md) | ✓ | [Fortanix ABI] for 64-bit Intel SGX
-`x86_64-fuchsia` | ✓ | Alias for `x86_64-unknown-fuchsia`
 [`x86_64-unknown-fuchsia`](platform-support/fuchsia.md) | ✓ | 64-bit x86 Fuchsia
 [`x86_64-linux-android`](platform-support/android.md) | ✓ | 64-bit x86 Android
 `x86_64-pc-solaris` | ✓ | 64-bit Solaris 11, illumos
@@ -245,8 +243,9 @@ host tools.
 
 target | std | host | notes
 -------|:---:|:----:|-------
-[`arm64e-apple-ios`](platform-support/arm64e-apple-ios.md) | ✓ | | ARM64e Apple iOS
 [`arm64e-apple-darwin`](platform-support/arm64e-apple-darwin.md)  | ✓ | ✓ | ARM64e Apple Darwin
+[`arm64e-apple-ios`](platform-support/arm64e-apple-ios.md) | ✓ | | ARM64e Apple iOS
+[`arm64e-apple-tvos`](platform-support/arm64e-apple-tvos.md)  | ✓ | | ARM64e Apple tvOS
 [`aarch64-apple-tvos`](platform-support/apple-tvos.md) | ✓ |  | ARM64 tvOS
 [`aarch64-apple-tvos-sim`](platform-support/apple-tvos.md) | ✓ |  | ARM64 tvOS Simulator
 [`aarch64-apple-watchos`](platform-support/apple-watchos.md) | ✓ |  | ARM64 Apple WatchOS
@@ -314,6 +313,7 @@ target | std | host | notes
 `i686-uwp-windows-msvc` | ✓ |  | [^x86_32-floats-return-ABI]
 [`i686-win7-windows-msvc`](platform-support/win7-windows-msvc.md) | ✓ |   | 32-bit Windows 7 support [^x86_32-floats-return-ABI]
 [`i686-wrs-vxworks`](platform-support/vxworks.md) | ✓ |  | [^x86_32-floats-return-ABI]
+[`loongarch64-unknown-linux-ohos`](platform-support/openharmony.md) | ✓ |   | LoongArch64 OpenHarmony
 [`m68k-unknown-linux-gnu`](platform-support/m68k-unknown-linux-gnu.md) | ? |  | Motorola 680x0 Linux
 `mips-unknown-linux-gnu` | ✓ | ✓ | MIPS Linux (kernel 4.4, glibc 2.23)
 `mips-unknown-linux-musl` | ✓ |  | MIPS Linux with musl 1.2.3
@@ -358,12 +358,14 @@ target | std | host | notes
 [`riscv32imc-esp-espidf`](platform-support/esp-idf.md) | ✓ |  | RISC-V ESP-IDF
 [`riscv32imac-esp-espidf`](platform-support/esp-idf.md) | ✓ |  | RISC-V ESP-IDF
 [`riscv32imafc-esp-espidf`](platform-support/esp-idf.md) | ✓ |  | RISC-V ESP-IDF
+[`riscv32-wrs-vxworks`](platform-support/vxworks.md) | ✓ |  |
 [`riscv64gc-unknown-hermit`](platform-support/hermit.md) | ✓ |   | RISC-V Hermit
 `riscv64gc-unknown-freebsd` |   |   | RISC-V FreeBSD
 `riscv64gc-unknown-fuchsia` |   |   | RISC-V Fuchsia
 [`riscv64gc-unknown-netbsd`](platform-support/netbsd.md) | ✓ | ✓ | RISC-V NetBSD
 [`riscv64gc-unknown-openbsd`](platform-support/openbsd.md) | ✓ | ✓ | OpenBSD/riscv64
 [`riscv64-linux-android`](platform-support/android.md) |   |   | RISC-V 64-bit Android
+[`riscv64-wrs-vxworks`](platform-support/vxworks.md) | ✓ |  |
 `s390x-unknown-linux-musl` |  |  | S390x Linux (kernel 3.2, musl 1.2.3)
 `sparc-unknown-linux-gnu` | ✓ |  | 32-bit SPARC Linux
 [`sparc-unknown-none-elf`](./platform-support/sparc-unknown-none-elf.md) | * |  | Bare 32-bit SPARC V7+
@@ -382,9 +384,11 @@ target | std | host | notes
 [`x86_64-unikraft-linux-musl`](platform-support/unikraft-linux-musl.md) | ✓ |   | 64-bit Unikraft with musl 1.2.3
 `x86_64-unknown-dragonfly` | ✓ | ✓ | 64-bit DragonFlyBSD
 `x86_64-unknown-haiku` | ✓ | ✓ | 64-bit Haiku
+[`x86_64-unknown-hurd-gnu`](platform-support/hurd.md) | ✓ | ✓ | 64-bit GNU/Hurd
 [`x86_64-unknown-hermit`](platform-support/hermit.md) | ✓ |  | x86_64 Hermit
 `x86_64-unknown-l4re-uclibc` | ? |  |
 [`x86_64-unknown-openbsd`](platform-support/openbsd.md) | ✓ | ✓ | 64-bit OpenBSD
+[`x86_64-unknown-trusty`](platform-support/trusty.md) | ? |  |
 `x86_64-uwp-windows-gnu` | ✓ |  |
 `x86_64-uwp-windows-msvc` | ✓ |  |
 [`x86_64-win7-windows-msvc`](platform-support/win7-windows-msvc.md) | ✓ |   | 64-bit Windows 7 support
@@ -409,5 +413,8 @@ target | std | host | notes
 [`riscv32imafc-unknown-nuttx-elf`](platform-support/nuttx.md) | * |  | RISC-V 32bit with NuttX
 [`riscv64imac-unknown-nuttx-elf`](platform-support/nuttx.md) | * |  | RISC-V 64bit with NuttX
 [`riscv64gc-unknown-nuttx-elf`](platform-support/nuttx.md) | * |  | RISC-V 64bit with NuttX
+[`riscv32e-unknown-none-elf`](platform-support/riscv32-unknown-none-elf.md) | * |  | Bare RISC-V (RV32E ISA)
+[`riscv32em-unknown-none-elf`](platform-support/riscv32-unknown-none-elf.md) | * |  | Bare RISC-V (RV32EM ISA)
+[`riscv32emc-unknown-none-elf`](platform-support/riscv32-unknown-none-elf.md) | * |  | Bare RISC-V (RV32EMC ISA)
 
 [runs on NVIDIA GPUs]: https://github.com/japaric-archived/nvptx#targets

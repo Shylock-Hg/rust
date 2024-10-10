@@ -14,9 +14,10 @@
 #[no_mangle]
 pub extern "x86-interrupt" fn page_fault_handler(_: u64, _: u64) {
     unsafe {
-        core::arch::asm!("ud2", options(noreturn));
+        core::arch::naked_asm!("ud2");
     }
 }
 
 // CHECK: #[[ATTRS]] =
 // CHECK-NOT: sanitize_address
+// CHECK: !llvm.module.flags

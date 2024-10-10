@@ -1,5 +1,6 @@
+use std::collections::BTreeSet;
 use std::env;
-use std::fs::{remove_file, File};
+use std::fs::{File, remove_file};
 use std::io::Write;
 use std::path::Path;
 
@@ -11,7 +12,7 @@ use super::{ChangeIdWrapper, Config};
 use crate::core::build_steps::clippy::get_clippy_rules_in_order;
 use crate::core::config::{LldMode, Target, TargetSelection, TomlConfig};
 
-fn parse(config: &str) -> Config {
+pub(crate) fn parse(config: &str) -> Config {
     Config::parse_inner(
         Flags::parse(&["check".to_string(), "--config=/does/not/exist".to_string()]),
         |&_| toml::from_str(&config),
@@ -32,7 +33,7 @@ fn download_ci_llvm() {
     assert!(!parse_llvm("llvm.download-ci-llvm = false"));
     assert_eq!(parse_llvm(""), if_unchanged);
     assert_eq!(parse_llvm("rust.channel = \"dev\""), if_unchanged);
-    assert!(!parse_llvm("rust.channel = \"stable\""));
+    assert!(parse_llvm("rust.channel = \"stable\""));
     assert_eq!(parse_llvm("build.build = \"x86_64-unknown-linux-gnu\""), if_unchanged);
     assert_eq!(
         parse_llvm(
@@ -316,4 +317,34 @@ fn order_of_clippy_rules() {
     ];
 
     assert_eq!(expected, actual);
+}
+
+#[test]
+fn verbose_tests_default_value() {
+    let config = Config::parse(Flags::parse(&["build".into(), "compiler".into()]));
+    assert_eq!(config.verbose_tests, false);
+
+    let config = Config::parse(Flags::parse(&["build".into(), "compiler".into(), "-v".into()]));
+    assert_eq!(config.verbose_tests, true);
+}
+
+#[test]
+fn parse_rust_std_features() {
+    let config = parse("rust.std-features = [\"panic-unwind\", \"backtrace\"]");
+    let expected_features: BTreeSet<String> =
+        ["panic-unwind", "backtrace"].into_iter().map(|s| s.to_string()).collect();
+    assert_eq!(config.rust_std_features, expected_features);
+}
+
+#[test]
+fn parse_rust_std_features_empty() {
+    let config = parse("rust.std-features = []");
+    let expected_features: BTreeSet<String> = BTreeSet::new();
+    assert_eq!(config.rust_std_features, expected_features);
+}
+
+#[test]
+#[should_panic]
+fn parse_rust_std_features_invalid() {
+    parse("rust.std-features = \"backtrace\"");
 }

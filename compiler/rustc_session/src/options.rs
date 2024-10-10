@@ -13,14 +13,14 @@ use rustc_span::edition::Edition;
 use rustc_span::{RealFileName, SourceFileHashAlgorithm};
 use rustc_target::spec::{
     CodeModel, FramePointer, LinkerFlavorCli, MergeFunctions, OnBrokenPipe, PanicStrategy,
-    RelocModel, RelroLevel, SanitizerSet, SplitDebuginfo, StackProtector, TargetTriple, TlsModel,
-    WasmCAbi,
+    RelocModel, RelroLevel, SanitizerSet, SplitDebuginfo, StackProtector, SymbolVisibility,
+    TargetTriple, TlsModel, WasmCAbi,
 };
 
 use crate::config::*;
 use crate::search_paths::SearchPath;
 use crate::utils::NativeLib;
-use crate::{lint, EarlyDiagCtxt};
+use crate::{EarlyDiagCtxt, lint};
 
 macro_rules! insert {
     ($opt_name:ident, $opt_expr:expr, $sub_hashes:expr) => {
@@ -353,7 +353,7 @@ fn build_options<O: Default>(
             None => early_dcx.early_fatal(format!("unknown {outputname} option: `{key}`")),
         }
     }
-    return op;
+    op
 }
 
 #[allow(non_upper_case_globals)]
@@ -403,7 +403,7 @@ mod desc {
     pub(crate) const parse_unpretty: &str = "`string` or `string=string`";
     pub(crate) const parse_treat_err_as_bug: &str = "either no value or a non-negative number";
     pub(crate) const parse_next_solver_config: &str =
-        "either `globally` (when used without an argument), `coherence` (default) or `no`";
+        "a comma separated list of solver configurations: `globally` (default), and `coherence`";
     pub(crate) const parse_lto: &str =
         "either a boolean (`yes`, `no`, `on`, `off`, etc), `thin`, `fat`, or omitted";
     pub(crate) const parse_linker_plugin_lto: &str =
@@ -416,7 +416,11 @@ mod desc {
         "one of: `disabled`, `trampolines`, or `aliases`";
     pub(crate) const parse_symbol_mangling_version: &str =
         "one of: `legacy`, `v0` (RFC 2603), or `hashed`";
-    pub(crate) const parse_src_file_hash: &str = "either `md5` or `sha1`";
+    pub(crate) const parse_opt_symbol_visibility: &str =
+        "one of: `hidden`, `protected`, or `interposable`";
+    pub(crate) const parse_cargo_src_file_hash: &str =
+        "one of `blake3`, `md5`, `sha1`, or `sha256`";
+    pub(crate) const parse_src_file_hash: &str = "one of `md5`, `sha1`, or `sha256`";
     pub(crate) const parse_relocation_model: &str =
         "one of supported relocation models (`rustc --print relocation-models`)";
     pub(crate) const parse_code_model: &str =
@@ -922,6 +926,20 @@ mod parse {
         true
     }
 
+    pub(crate) fn parse_opt_symbol_visibility(
+        slot: &mut Option<SymbolVisibility>,
+        v: Option<&str>,
+    ) -> bool {
+        if let Some(v) = v {
+            if let Ok(vis) = SymbolVisibility::from_str(v) {
+                *slot = Some(vis);
+            } else {
+                return false;
+            }
+        }
+        true
+    }
+
     pub(crate) fn parse_optimization_fuel(
         slot: &mut Option<(String, u64)>,
         v: Option<&str>,
@@ -1105,16 +1123,27 @@ mod parse {
         }
     }
 
-    pub(crate) fn parse_next_solver_config(slot: &mut NextSolverConfig, v: Option<&str>) -> bool {
+    pub(crate) fn parse_next_solver_config(
+        slot: &mut Option<NextSolverConfig>,
+        v: Option<&str>,
+    ) -> bool {
         if let Some(config) = v {
-            *slot = match config {
-                "no" => NextSolverConfig { coherence: false, globally: false },
-                "coherence" => NextSolverConfig { coherence: true, globally: false },
-                "globally" => NextSolverConfig { coherence: true, globally: true },
-                _ => return false,
-            };
+            let mut coherence = false;
+            let mut globally = true;
+            for c in config.split(',') {
+                match c {
+                    "globally" => globally = true,
+                    "coherence" => {
+                        globally = false;
+                        coherence = true;
+                    }
+                    _ => return false,
+                }
+            }
+
+            *slot = Some(NextSolverConfig { coherence: coherence || globally, globally });
         } else {
-            *slot = NextSolverConfig { coherence: true, globally: true };
+            *slot = Some(NextSolverConfig { coherence: true, globally: true });
         }
 
         true
@@ -1256,6 +1285,19 @@ mod parse {
     ) -> bool {
         match v.and_then(|s| SourceFileHashAlgorithm::from_str(s).ok()) {
             Some(hash_kind) => *slot = Some(hash_kind),
+            _ => return false,
+        }
+        true
+    }
+
+    pub(crate) fn parse_cargo_src_file_hash(
+        slot: &mut Option<SourceFileHashAlgorithm>,
+        v: Option<&str>,
+    ) -> bool {
+        match v.and_then(|s| SourceFileHashAlgorithm::from_str(s).ok()) {
+            Some(hash_kind) => {
+                *slot = Some(hash_kind);
+            }
             _ => return false,
         }
         true
@@ -1504,6 +1546,7 @@ options! {
     // - src/doc/rustc/src/codegen-options/index.md
 
     // tidy-alphabetical-start
+    #[rustc_lint_opt_deny_field_access("documented to do nothing")]
     ar: String = (String::new(), parse_string, [UNTRACKED],
         "this option is deprecated and does nothing"),
     #[rustc_lint_opt_deny_field_access("use `Session::code_model` instead of this field")]
@@ -1536,6 +1579,7 @@ options! {
         "force use of unwind tables"),
     incremental: Option<String> = (None, parse_opt_string, [UNTRACKED],
         "enable incremental compilation"),
+    #[rustc_lint_opt_deny_field_access("documented to do nothing")]
     inline_threshold: Option<u32> = (None, parse_opt_number, [TRACKED],
         "this option is deprecated and does nothing \
         (consider using `-Cllvm-args=--inline-threshold=...`)"),
@@ -1572,6 +1616,7 @@ options! {
         "give an empty list of passes to the pass manager"),
     no_redzone: Option<bool> = (None, parse_opt_bool, [TRACKED],
         "disable the use of the redzone"),
+    #[rustc_lint_opt_deny_field_access("documented to do nothing")]
     no_stack_check: bool = (false, parse_no_flag, [UNTRACKED],
         "this option is deprecated and does nothing"),
     no_vectorize_loops: bool = (false, parse_no_flag, [TRACKED],
@@ -1608,7 +1653,7 @@ options! {
     save_temps: bool = (false, parse_bool, [UNTRACKED],
         "save all temporary output files during compilation (default: no)"),
     soft_float: bool = (false, parse_bool, [TRACKED],
-        "use soft float ABI (*eabihf targets only) (default: no)"),
+        "deprecated option: use soft float ABI (*eabihf targets only) (default: no)"),
     #[rustc_lint_opt_deny_field_access("use `Session::split_debuginfo` instead of this field")]
     split_debuginfo: Option<SplitDebuginfo> = (None, parse_split_debuginfo, [TRACKED],
         "how to handle split-debuginfo, a platform-specific option"),
@@ -1658,6 +1703,8 @@ options! {
         "instrument control-flow architecture protection"),
     check_cfg_all_expected: bool = (false, parse_bool, [UNTRACKED],
         "show all expected values in check-cfg diagnostics (default: no)"),
+    checksum_hash_algorithm: Option<SourceFileHashAlgorithm> = (None, parse_cargo_src_file_hash, [TRACKED],
+        "hash algorithm of source files used to check freshness in cargo (`blake3` or `sha256`)"),
     codegen_backend: Option<String> = (None, parse_opt_string, [TRACKED],
         "the backend to use"),
     combine_cgu: bool = (false, parse_bool, [TRACKED],
@@ -1674,8 +1721,8 @@ options! {
         "compress debug info sections (none, zlib, zstd, default: none)"),
     deduplicate_diagnostics: bool = (true, parse_bool, [UNTRACKED],
         "deduplicate identical diagnostics (default: yes)"),
-    default_hidden_visibility: Option<bool> = (None, parse_opt_bool, [TRACKED],
-        "overrides the `default_hidden_visibility` setting of the target"),
+    default_visibility: Option<SymbolVisibility> = (None, parse_opt_symbol_visibility, [TRACKED],
+        "overrides the `default_visibility` setting of the target"),
     dep_info_omit_d_target: bool = (false, parse_bool, [TRACKED],
         "in dep-info output, omit targets for tracking dependencies of the dep-info files \
         themselves (default: no)"),
@@ -1867,7 +1914,7 @@ options! {
         "the size at which the `large_assignments` lint starts to be emitted"),
     mutable_noalias: bool = (true, parse_bool, [TRACKED],
         "emit noalias metadata for mutable references (default: yes)"),
-    next_solver: NextSolverConfig = (NextSolverConfig::default(), parse_next_solver_config, [TRACKED],
+    next_solver: Option<NextSolverConfig> = (None, parse_next_solver_config, [TRACKED],
         "enable and configure the next generation trait solver used by rustc"),
     nll_facts: bool = (false, parse_bool, [UNTRACKED],
         "dump facts from NLL analysis into side files (default: no)"),
@@ -2014,6 +2061,8 @@ written to standard error output)"),
     simulate_remapped_rust_src_base: Option<PathBuf> = (None, parse_opt_pathbuf, [TRACKED],
         "simulate the effect of remap-debuginfo = true at bootstrapping by remapping path \
         to rust's source base directory. only meant for testing purposes"),
+    small_data_threshold: Option<usize> = (None, parse_opt_number, [TRACKED],
+        "Set the threshold for objects to be stored in a \"small data\" section"),
     span_debug: bool = (false, parse_bool, [UNTRACKED],
         "forward proc_macro::Span's `Debug` impl to `Span`"),
     /// o/w tests have closure@path
