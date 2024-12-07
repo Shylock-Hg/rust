@@ -292,6 +292,7 @@
 #![feature(dropck_eyepatch)]
 #![feature(f128)]
 #![feature(f16)]
+#![feature(formatting_options)]
 #![feature(if_let_guard)]
 #![feature(intra_doc_pointers)]
 #![feature(lang_items)]
@@ -589,7 +590,7 @@ pub mod net;
 pub mod num;
 pub mod os;
 pub mod panic;
-#[unstable(feature = "core_pattern_types", issue = "123646")]
+#[unstable(feature = "pattern_type_macro", issue = "123646")]
 pub mod pat;
 pub mod path;
 #[unstable(feature = "anonymous_pipe", issue = "127154")]
