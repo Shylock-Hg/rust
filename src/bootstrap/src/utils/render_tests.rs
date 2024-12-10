@@ -187,10 +187,10 @@ impl<'a> Renderer<'a> {
     }
 
     fn render_test_outcome_verbose(&self, outcome: Outcome<'_>, test: &TestOutcome) {
-        print!("test {} ... ", test.name);
-        self.builder.colored_stdout(|stdout| outcome.write_long(stdout)).unwrap();
+        eprint!("test {} ... ", test.name);
+        self.builder.colored_stderr(|stdout| outcome.write_long(stdout)).unwrap();
         if let Some(exec_time) = test.exec_time {
-            print!(" ({exec_time:.2?})");
+            eprint!(" ({exec_time:.2?})");
         }
         eprintln!();
     }
@@ -200,14 +200,14 @@ impl<'a> Renderer<'a> {
             if let Some(total) = self.tests_count {
                 let total = total.to_string();
                 let executed = format!("{:>width$}", self.executed_tests - 1, width = total.len());
-                print!(" {executed}/{total}");
+                eprint!(" {executed}/{total}");
             }
             eprintln!();
             self.terse_tests_in_line = 0;
         }
 
         self.terse_tests_in_line += 1;
-        self.builder.colored_stdout(|stdout| outcome.write_short(stdout, &test.name)).unwrap();
+        self.builder.colored_stderr(|stdout| outcome.write_short(stdout, &test.name)).unwrap();
         let _ = std::io::stdout().flush();
     }
 
@@ -257,8 +257,8 @@ impl<'a> Renderer<'a> {
             }
         }
 
-        print!("\ntest result: ");
-        self.builder.colored_stdout(|stdout| outcome.write_long(stdout)).unwrap();
+        eprint!("\ntest result: ");
+        self.builder.colored_stderr(|stdout| outcome.write_long(stdout)).unwrap();
         eprintln!(
             ". {} passed; {} failed; {} ignored; {} measured; {} filtered out{time}\n",
             suite.passed,

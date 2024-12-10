@@ -394,7 +394,7 @@ pub fn interactive_path() -> io::Result<Profile> {
         eprintln!("{}) {}: {}", letter, profile, profile.purpose());
     }
     let template = loop {
-        print!(
+        eprint!(
             "Please choose one ({}): ",
             abbrev_all().map(|((l, _), _)| l).collect::<Vec<_>>().join("/")
         );
@@ -428,7 +428,7 @@ enum PromptResult {
 fn prompt_user(prompt: &str) -> io::Result<Option<PromptResult>> {
     let mut input = String::new();
     loop {
-        print!("{prompt} ");
+        eprint!("{prompt} ");
         io::stdout().flush()?;
         input.clear();
         io::stdin().read_line(&mut input)?;
@@ -452,24 +452,26 @@ pub struct Hook;
 impl Step for Hook {
     type Output = ();
     const DEFAULT: bool = true;
+
     fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
         run.alias("hook")
     }
+
     fn make_run(run: RunConfig<'_>) {
-        if run.builder.config.dry_run() {
-            return;
-        }
         if let [cmd] = &run.paths[..] {
             if cmd.assert_single_path().path.as_path().as_os_str() == "hook" {
                 run.builder.ensure(Hook);
             }
         }
     }
+
     fn run(self, builder: &Builder<'_>) -> Self::Output {
         let config = &builder.config;
-        if config.dry_run() {
+
+        if config.dry_run() || !config.rust_info.is_managed_git_subrepository() {
             return;
         }
+
         t!(install_git_hook_maybe(builder, config));
     }
 }
@@ -539,7 +541,7 @@ Select which editor you would like to set up [default: None]: ";
 
         let mut input = String::new();
         loop {
-            print!("{}", prompt_str);
+            eprint!("{}", prompt_str);
             io::stdout().flush()?;
             input.clear();
             io::stdin().read_line(&mut input)?;
