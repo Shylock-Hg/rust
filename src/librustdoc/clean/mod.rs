@@ -55,7 +55,7 @@ use rustc_trait_selection::traits::wf::object_region_bounds;
 use thin_vec::ThinVec;
 use tracing::{debug, instrument};
 use utils::*;
-use {rustc_ast as ast, rustc_attr as attr, rustc_hir as hir};
+use {rustc_ast as ast, rustc_hir as hir};
 
 pub(crate) use self::types::*;
 pub(crate) use self::utils::{krate, register_res, synthesize_auto_trait_and_blanket_impls};
@@ -2604,7 +2604,7 @@ fn filter_tokens_from_list(
 ) -> Vec<TokenTree> {
     let mut tokens = Vec::with_capacity(args_tokens.len());
     let mut skip_next_comma = false;
-    for token in args_tokens.trees() {
+    for token in args_tokens.iter() {
         match token {
             TokenTree::Token(Token { kind: TokenKind::Comma, .. }, _) if skip_next_comma => {
                 skip_next_comma = false;
@@ -2895,7 +2895,7 @@ fn clean_extern_crate<'tcx>(
         && attrs.iter().any(|a| {
             a.has_name(sym::doc)
                 && match a.meta_item_list() {
-                    Some(l) => attr::list_contains_name(&l, sym::inline),
+                    Some(l) => ast::attr::list_contains_name(&l, sym::inline),
                     None => false,
                 }
         })
@@ -3000,8 +3000,8 @@ fn clean_use_statement_inner<'tcx>(
             a.has_name(sym::doc)
                 && match a.meta_item_list() {
                     Some(l) => {
-                        attr::list_contains_name(&l, sym::no_inline)
-                            || attr::list_contains_name(&l, sym::hidden)
+                        ast::attr::list_contains_name(&l, sym::no_inline)
+                            || ast::attr::list_contains_name(&l, sym::hidden)
                     }
                     None => false,
                 }

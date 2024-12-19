@@ -30,8 +30,7 @@ use rustc_session::lint::builtin::{
     UNKNOWN_OR_MALFORMED_DIAGNOSTIC_ATTRIBUTES, UNUSED_ATTRIBUTES,
 };
 use rustc_session::parse::feature_err;
-use rustc_span::symbol::{Symbol, kw, sym};
-use rustc_span::{BytePos, DUMMY_SP, Span};
+use rustc_span::{BytePos, DUMMY_SP, Span, Symbol, kw, sym};
 use rustc_target::abi::Size;
 use rustc_target::spec::abi::Abi;
 use rustc_trait_selection::error_reporting::InferCtxtErrorExt;
@@ -116,7 +115,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
         for attr in attrs {
             match attr.path().as_slice() {
                 [sym::diagnostic, sym::do_not_recommend, ..] => {
-                    self.check_do_not_recommend(attr.span, hir_id, target)
+                    self.check_do_not_recommend(attr.span, hir_id, target, attr, item)
                 }
                 [sym::diagnostic, sym::on_unimplemented, ..] => {
                     self.check_diagnostic_on_unimplemented(attr.span, hir_id, target)
@@ -349,13 +348,34 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
     }
 
     /// Checks if `#[diagnostic::do_not_recommend]` is applied on a trait impl.
-    fn check_do_not_recommend(&self, attr_span: Span, hir_id: HirId, target: Target) {
-        if !matches!(target, Target::Impl) {
+    fn check_do_not_recommend(
+        &self,
+        attr_span: Span,
+        hir_id: HirId,
+        target: Target,
+        attr: &Attribute,
+        item: Option<ItemLike<'_>>,
+    ) {
+        if !matches!(target, Target::Impl)
+            || matches!(
+                item,
+                Some(ItemLike::Item(hir::Item {  kind: hir::ItemKind::Impl(_impl),.. }))
+                    if _impl.of_trait.is_none()
+            )
+        {
             self.tcx.emit_node_span_lint(
                 UNKNOWN_OR_MALFORMED_DIAGNOSTIC_ATTRIBUTES,
                 hir_id,
                 attr_span,
                 errors::IncorrectDoNotRecommendLocation,
+            );
+        }
+        if !attr.is_word() {
+            self.tcx.emit_node_span_lint(
+                UNKNOWN_OR_MALFORMED_DIAGNOSTIC_ATTRIBUTES,
+                hir_id,
+                attr_span,
+                errors::DoNotRecommendDoesNotExpectArgs,
             );
         }
     }

@@ -33,8 +33,7 @@ use rustc_session::config::{CrateType, ResolveDocLinks};
 use rustc_session::lint::{self, BuiltinLintDiag};
 use rustc_session::parse::feature_err;
 use rustc_span::source_map::{Spanned, respan};
-use rustc_span::symbol::{Ident, Symbol, kw, sym};
-use rustc_span::{BytePos, Span, SyntaxContext};
+use rustc_span::{BytePos, Ident, Span, Symbol, SyntaxContext, kw, sym};
 use smallvec::{SmallVec, smallvec};
 use tracing::{debug, instrument, trace};
 
@@ -4326,7 +4325,7 @@ impl<'a, 'ast, 'ra: 'ast, 'tcx> LateResolutionVisitor<'a, 'ast, 'ra, 'tcx> {
 
     #[inline]
     /// If we're actually rustdoc then avoid giving a name resolution error for `cfg()` items or
-    // an invalid `use foo::*;` was found, which can cause unbounded ammounts of "item not found"
+    // an invalid `use foo::*;` was found, which can cause unbounded amounts of "item not found"
     // errors. We silence them all.
     fn should_report_errs(&self) -> bool {
         !(self.r.tcx.sess.opts.actually_rustdoc && self.in_func_body)

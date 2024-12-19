@@ -12,8 +12,7 @@ use rustc_middle::bug;
 use rustc_middle::traits::ObligationCauseCode;
 use rustc_middle::ty::error::TypeError;
 use rustc_middle::ty::{self, IsSuggestable, Region, Ty, TyCtxt, TypeVisitableExt as _};
-use rustc_span::symbol::kw;
-use rustc_span::{BytePos, ErrorGuaranteed, Span, Symbol};
+use rustc_span::{BytePos, ErrorGuaranteed, Span, Symbol, kw};
 use rustc_type_ir::Upcast as _;
 use tracing::{debug, instrument};
 
@@ -1096,13 +1095,13 @@ fn msg_span_from_named_region<'tcx>(
             (text, Some(span))
         }
         ty::ReLateParam(ref fr) => {
-            if !fr.bound_region.is_named()
+            if !fr.kind.is_named()
                 && let Some((ty, _)) = find_anon_type(tcx, generic_param_scope, region)
             {
                 ("the anonymous lifetime defined here".to_string(), Some(ty.span))
             } else {
-                match fr.bound_region {
-                    ty::BoundRegionKind::Named(param_def_id, name) => {
+                match fr.kind {
+                    ty::LateParamRegionKind::Named(param_def_id, name) => {
                         let span = tcx.def_span(param_def_id);
                         let text = if name == kw::UnderscoreLifetime {
                             "the anonymous lifetime as defined here".to_string()
@@ -1111,7 +1110,7 @@ fn msg_span_from_named_region<'tcx>(
                         };
                         (text, Some(span))
                     }
-                    ty::BoundRegionKind::Anon => (
+                    ty::LateParamRegionKind::Anon(_) => (
                         "the anonymous lifetime as defined here".to_string(),
                         Some(tcx.def_span(generic_param_scope)),
                     ),
