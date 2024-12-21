@@ -15,8 +15,7 @@ use rustc_middle::bug;
 use rustc_middle::hir::place::PlaceBase;
 use rustc_middle::mir::{ConstraintCategory, ReturnConstraint};
 use rustc_middle::ty::{self, GenericArgs, Region, RegionVid, Ty, TyCtxt, TypeVisitor};
-use rustc_span::Span;
-use rustc_span::symbol::{Ident, kw};
+use rustc_span::{Ident, Span, kw};
 use rustc_trait_selection::error_reporting::InferCtxtErrorExt;
 use rustc_trait_selection::error_reporting::infer::nice_region_error::{
     self, HirTraitObjectVisitor, NiceRegionError, TraitObjectVisitor, find_anon_type,
@@ -189,7 +188,7 @@ impl<'infcx, 'tcx> MirBorrowckCtxt<'_, 'infcx, 'tcx> {
     /// Returns `true` if a closure is inferred to be an `FnMut` closure.
     fn is_closure_fn_mut(&self, fr: RegionVid) -> bool {
         if let Some(ty::ReLateParam(late_param)) = self.to_error_region(fr).as_deref()
-            && let ty::BoundRegionKind::ClosureEnv = late_param.bound_region
+            && let ty::LateParamRegionKind::ClosureEnv = late_param.kind
             && let DefiningTy::Closure(_, args) = self.regioncx.universal_regions().defining_ty
         {
             return args.as_closure().kind() == ty::ClosureKind::FnMut;

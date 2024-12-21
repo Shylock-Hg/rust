@@ -24,8 +24,7 @@ use rustc_middle::query::TyCtxtAt;
 use rustc_middle::thir::{self, ExprId, LintLevel, LocalVarId, Param, ParamId, PatKind, Thir};
 use rustc_middle::ty::{self, ScalarInt, Ty, TyCtxt, TypeVisitableExt, TypingMode};
 use rustc_middle::{bug, span_bug};
-use rustc_span::symbol::sym;
-use rustc_span::{Span, Symbol};
+use rustc_span::{Span, Symbol, sym};
 
 use super::lints;
 use crate::builder::expr::as_place::PlaceBuilder;
@@ -532,9 +531,9 @@ fn construct_fn<'tcx>(
     );
 
     let call_site_scope =
-        region::Scope { id: body.id().hir_id.local_id, data: region::ScopeData::CallSite };
+        region::Scope { local_id: body.id().hir_id.local_id, data: region::ScopeData::CallSite };
     let arg_scope =
-        region::Scope { id: body.id().hir_id.local_id, data: region::ScopeData::Arguments };
+        region::Scope { local_id: body.id().hir_id.local_id, data: region::ScopeData::Arguments };
     let source_info = builder.source_info(span);
     let call_site_s = (call_site_scope, source_info);
     let _: BlockAnd<()> = builder.in_scope(call_site_s, LintLevel::Inherited, |builder| {
