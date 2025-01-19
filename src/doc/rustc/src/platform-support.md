@@ -264,7 +264,7 @@ target | std | host | notes
 [`aarch64-unknown-redox`](platform-support/redox.md) | ✓ |  | ARM64 Redox OS
 [`aarch64-unknown-teeos`](platform-support/aarch64-unknown-teeos.md) | ? |  | ARM64 TEEOS |
 [`aarch64-unknown-trusty`](platform-support/trusty.md) | ? |  |
-`aarch64-uwp-windows-msvc` | ✓ |  |
+[`aarch64-uwp-windows-msvc`](platform-support/uwp-windows-msvc.md) | ✓ |  |
 [`aarch64-wrs-vxworks`](platform-support/vxworks.md) | ✓ |  | ARM64 VxWorks OS
 `aarch64_be-unknown-linux-gnu` | ✓ | ✓ | ARM64 Linux (big-endian)
 `aarch64_be-unknown-linux-gnu_ilp32` | ✓ | ✓ | ARM64 Linux (big-endian, ILP32 ABI)
@@ -312,11 +312,13 @@ target | std | host | notes
 [`i686-unknown-openbsd`](platform-support/openbsd.md) | ✓ | ✓ | 32-bit OpenBSD [^x86_32-floats-return-ABI]
 [`i686-unknown-redox`](platform-support/redox.md) | ✓ |  | i686 Redox OS
 `i686-uwp-windows-gnu` | ✓ |  | [^x86_32-floats-return-ABI]
-`i686-uwp-windows-msvc` | ✓ |  | [^x86_32-floats-return-ABI]
+[`i686-uwp-windows-msvc`](platform-support/uwp-windows-msvc.md) | ✓ |  | [^x86_32-floats-return-ABI]
+[`i686-win7-windows-gnu`](platform-support/win7-windows-gnu.md) | ✓ |   | 32-bit Windows 7 support [^x86_32-floats-return-ABI]
 [`i686-win7-windows-msvc`](platform-support/win7-windows-msvc.md) | ✓ |   | 32-bit Windows 7 support [^x86_32-floats-return-ABI]
 [`i686-wrs-vxworks`](platform-support/vxworks.md) | ✓ |  | [^x86_32-floats-return-ABI]
 [`loongarch64-unknown-linux-ohos`](platform-support/openharmony.md) | ✓ |   | LoongArch64 OpenHarmony
 [`m68k-unknown-linux-gnu`](platform-support/m68k-unknown-linux-gnu.md) | ? |  | Motorola 680x0 Linux
+[`m68k-unknown-none-elf`](platform-support/m68k-unknown-none-elf.md) |  |  | Motorola 680x0
 `mips-unknown-linux-gnu` | ✓ | ✓ | MIPS Linux (kernel 4.4, glibc 2.23)
 `mips-unknown-linux-musl` | ✓ |  | MIPS Linux with musl 1.2.3
 `mips-unknown-linux-uclibc` | ✓ |  | MIPS Linux with uClibc
@@ -332,6 +334,8 @@ target | std | host | notes
 `mipsel-unknown-linux-uclibc` | ✓ |  | MIPS (LE) Linux with uClibc
 [`mipsel-unknown-netbsd`](platform-support/netbsd.md) | ✓ | ✓ | 32-bit MIPS (LE), requires mips32 cpu support
 `mipsel-unknown-none` | * |  | Bare MIPS (LE) softfloat
+[`mips-mti-none-elf`](platform-support/mips-mti-none-elf.md) | * |  | Bare MIPS32r2 (BE) softfloat
+[`mipsel-mti-none-elf`](platform-support/mips-mti-none-elf.md) | * |  | Bare MIPS32r2 (LE) softfloat
 [`mipsisa32r6-unknown-linux-gnu`](platform-support/mips-release-6.md) | ? |  | 32-bit MIPS Release 6 Big Endian
 [`mipsisa32r6el-unknown-linux-gnu`](platform-support/mips-release-6.md) | ? |  | 32-bit MIPS Release 6 Little Endian
 [`mipsisa64r6-unknown-linux-gnuabi64`](platform-support/mips-release-6.md) | ? |  | 64-bit MIPS Release 6 Big Endian
@@ -383,8 +387,8 @@ target | std | host | notes
 [`thumbv4t-none-eabi`](platform-support/armv4t-none-eabi.md) | * |  | Thumb-mode Bare Armv4T
 [`thumbv5te-none-eabi`](platform-support/armv5te-none-eabi.md) | * |  | Thumb-mode Bare Armv5TE
 [`thumbv6m-nuttx-eabi`](platform-support/nuttx.md) | * |  | ARMv6M with NuttX
-`thumbv7a-pc-windows-msvc` | ✓ |  |
-`thumbv7a-uwp-windows-msvc` | ✓ |  |
+`thumbv7a-pc-windows-msvc` |  |  |
+[`thumbv7a-uwp-windows-msvc`](platform-support/uwp-windows-msvc.md) |  |  |
 [`thumbv7em-nuttx-eabi`](platform-support/nuttx.md) | * |  | ARMv7EM with NuttX
 [`thumbv7em-nuttx-eabihf`](platform-support/nuttx.md) | * |  | ARMv7EM with NuttX, hardfloat
 [`thumbv7m-nuttx-eabi`](platform-support/nuttx.md) | * |  | ARMv7M with NuttX
@@ -406,7 +410,8 @@ target | std | host | notes
 [`x86_64-unknown-openbsd`](platform-support/openbsd.md) | ✓ | ✓ | 64-bit OpenBSD
 [`x86_64-unknown-trusty`](platform-support/trusty.md) | ? |  |
 `x86_64-uwp-windows-gnu` | ✓ |  |
-`x86_64-uwp-windows-msvc` | ✓ |  |
+[`x86_64-uwp-windows-msvc`](platform-support/uwp-windows-msvc.md) | ✓ |  |
+[`x86_64-win7-windows-gnu`](platform-support/win7-windows-gnu.md) | ✓ |   | 64-bit Windows 7 support
 [`x86_64-win7-windows-msvc`](platform-support/win7-windows-msvc.md) | ✓ |   | 64-bit Windows 7 support
 [`x86_64-wrs-vxworks`](platform-support/vxworks.md) | ✓ |  |
 [`x86_64h-apple-darwin`](platform-support/x86_64h-apple-darwin.md) | ✓ | ✓ | macOS with late-gen Intel (at least Haswell)

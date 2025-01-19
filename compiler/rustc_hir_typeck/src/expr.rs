@@ -430,6 +430,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             | hir::Node::AssocItemConstraint(_)
             | hir::Node::TraitRef(_)
             | hir::Node::PatField(_)
+            | hir::Node::PatExpr(_)
             | hir::Node::LetStmt(_)
             | hir::Node::Synthetic
             | hir::Node::Err(_)
@@ -456,6 +457,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             // Does not constitute a read.
             hir::PatKind::Wild => false,
 
+            // Might not constitute a read, since the condition might be false.
+            hir::PatKind::Guard(_, _) => true,
+
             // This is unnecessarily restrictive when the pattern that doesn't
             // constitute a read is unreachable.
             //
@@ -481,7 +485,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             | hir::PatKind::Box(_)
             | hir::PatKind::Ref(_, _)
             | hir::PatKind::Deref(_)
-            | hir::PatKind::Lit(_)
+            | hir::PatKind::Expr(_)
             | hir::PatKind::Range(_, _, _)
             | hir::PatKind::Slice(_, _, _)
             | hir::PatKind::Err(_) => true,
@@ -834,7 +838,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         // We always require that the type provided as the value for
         // a type parameter outlives the moment of instantiation.
         let args = self.typeck_results.borrow().node_args(expr.hir_id);
-        self.add_wf_bounds(args, expr);
+        self.add_wf_bounds(args, expr.span);
 
         ty
     }
@@ -1127,7 +1131,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let encl_item_id = self.tcx.hir().get_parent_item(expr.hir_id);
 
         if let hir::Node::Item(hir::Item {
-            kind: hir::ItemKind::Fn(..), span: encl_fn_span, ..
+            kind: hir::ItemKind::Fn { .. },
+            span: encl_fn_span,
+            ..
         })
         | hir::Node::TraitItem(hir::TraitItem {
             kind: hir::TraitItemKind::Fn(_, hir::TraitFn::Provided(_)),
@@ -1771,12 +1777,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let parent_node = self.tcx.hir().parent_iter(expr.hir_id).find(|(_, node)| {
             !matches!(node, hir::Node::Expr(hir::Expr { kind: hir::ExprKind::AddrOf(..), .. }))
         });
-        let Some((
-            _,
-            hir::Node::LetStmt(hir::LetStmt { ty: Some(ty), .. })
-            | hir::Node::Item(hir::Item { kind: hir::ItemKind::Const(ty, _, _), .. }),
-        )) = parent_node
-        else {
+        let Some((_, hir::Node::LetStmt(hir::LetStmt { ty: Some(ty), .. }))) = parent_node else {
             return;
         };
         if let hir::TyKind::Array(_, ct) = ty.peel_refs().kind {
@@ -1796,7 +1797,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         }
     }
 
-    fn check_expr_const_block(
+    pub(super) fn check_expr_const_block(
         &self,
         block: &'tcx hir::ConstBlock,
         expected: Expectation<'tcx>,
@@ -1907,21 +1908,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         };
 
         let lang_item = self.tcx.require_lang_item(LangItem::Copy, None);
-        let code = traits::ObligationCauseCode::RepeatElementCopy {
-            is_constable,
-            elt_type: element_ty,
-            elt_span: element.span,
-            elt_stmt_span: self
-                .tcx
-                .hir()
-                .parent_iter(element.hir_id)
-                .find_map(|(_, node)| match node {
-                    hir::Node::Item(it) => Some(it.span),
-                    hir::Node::Stmt(stmt) => Some(stmt.span),
-                    _ => None,
-                })
-                .expect("array repeat expressions must be inside an item or statement"),
-        };
+        let code =
+            traits::ObligationCauseCode::RepeatElementCopy { is_constable, elt_span: element.span };
         self.require_type_meets(element_ty, element.span, code, lang_item);
     }
 
@@ -2003,18 +1991,18 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         adt_ty: Ty<'tcx>,
         expected: Expectation<'tcx>,
         expr: &hir::Expr<'_>,
-        span: Span,
+        path_span: Span,
         variant: &'tcx ty::VariantDef,
         hir_fields: &'tcx [hir::ExprField<'tcx>],
         base_expr: &'tcx hir::StructTailExpr<'tcx>,
     ) {
         let tcx = self.tcx;
 
-        let adt_ty = self.try_structurally_resolve_type(span, adt_ty);
+        let adt_ty = self.try_structurally_resolve_type(path_span, adt_ty);
         let adt_ty_hint = expected.only_has_type(self).and_then(|expected| {
             self.fudge_inference_if_ok(|| {
                 let ocx = ObligationCtxt::new(self);
-                ocx.sup(&self.misc(span), self.param_env, expected, adt_ty)?;
+                ocx.sup(&self.misc(path_span), self.param_env, expected, adt_ty)?;
                 if !ocx.select_where_possible().is_empty() {
                     return Err(TypeError::Mismatch);
                 }
@@ -2024,11 +2012,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         });
         if let Some(adt_ty_hint) = adt_ty_hint {
             // re-link the variables that the fudging above can create.
-            self.demand_eqtype(span, adt_ty_hint, adt_ty);
+            self.demand_eqtype(path_span, adt_ty_hint, adt_ty);
         }
 
         let ty::Adt(adt, args) = adt_ty.kind() else {
-            span_bug!(span, "non-ADT passed to check_expr_struct_fields");
+            span_bug!(path_span, "non-ADT passed to check_expr_struct_fields");
         };
         let adt_kind = adt.adt_kind();
 
@@ -2119,7 +2107,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         if adt_kind == AdtKind::Union && hir_fields.len() != 1 {
             struct_span_code_err!(
                 self.dcx(),
-                span,
+                path_span,
                 E0784,
                 "union expressions should have exactly one field",
             )
@@ -2150,13 +2138,24 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 }
             }
             if !self.tcx.features().default_field_values() {
+                let sugg = self.tcx.crate_level_attribute_injection_span(expr.hir_id);
                 self.dcx().emit_err(BaseExpressionDoubleDot {
                     span: span.shrink_to_hi(),
                     // We only mention enabling the feature if this is a nightly rustc *and* the
                     // expression would make sense with the feature enabled.
-                    default_field_values: if self.tcx.sess.is_nightly_build()
+                    default_field_values_suggestion: if self.tcx.sess.is_nightly_build()
                         && missing_mandatory_fields.is_empty()
                         && !missing_optional_fields.is_empty()
+                        && sugg.is_some()
+                    {
+                        sugg
+                    } else {
+                        None
+                    },
+                    default_field_values_help: if self.tcx.sess.is_nightly_build()
+                        && missing_mandatory_fields.is_empty()
+                        && !missing_optional_fields.is_empty()
+                        && sugg.is_none()
                     {
                         Some(BaseExpressionDoubleDotEnableDefaultFieldValues)
                     } else {
@@ -2178,6 +2177,17 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     },
                 });
                 return;
+            }
+            if variant.fields.is_empty() {
+                let mut err = self.dcx().struct_span_err(
+                    span,
+                    format!(
+                        "`{adt_ty}` has no fields, `..` needs at least one default field in the \
+                         struct definition",
+                    ),
+                );
+                err.span_label(path_span, "this type has no fields");
+                err.emit();
             }
             if !missing_mandatory_fields.is_empty() {
                 let s = pluralize!(missing_mandatory_fields.len());
@@ -2328,11 +2338,17 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 .collect();
 
             if !private_fields.is_empty() {
-                self.report_private_fields(adt_ty, span, expr.span, private_fields, hir_fields);
+                self.report_private_fields(
+                    adt_ty,
+                    path_span,
+                    expr.span,
+                    private_fields,
+                    hir_fields,
+                );
             } else {
                 self.report_missing_fields(
                     adt_ty,
-                    span,
+                    path_span,
                     remaining_fields,
                     variant,
                     hir_fields,
