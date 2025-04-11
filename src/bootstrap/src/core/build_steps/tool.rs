@@ -148,7 +148,9 @@ impl Step for ToolBuild {
             &self.extra_features,
         );
 
-        if path.ends_with("/rustdoc") &&
+        // Rustc tools (miri, clippy, cargo, rustfmt, rust-analyzer)
+        // could use the additional optimizations.
+        if self.mode == Mode::ToolRustc &&
             // rustdoc is performance sensitive, so apply LTO to it.
             is_lto_stage(&self.compiler)
         {
@@ -425,11 +427,14 @@ macro_rules! bootstrap_tool {
                     }
                 )*
 
+                let is_unstable = false $(|| $unstable)*;
+                let compiletest_wants_stage0 = $tool_name == "compiletest" && builder.config.compiletest_use_stage0_libtest;
+
                 builder.ensure(ToolBuild {
                     compiler: self.compiler,
                     target: self.target,
                     tool: $tool_name,
-                    mode: if false $(|| $unstable)* {
+                    mode: if is_unstable && !compiletest_wants_stage0 {
                         // use in-tree libraries for unstable features
                         Mode::ToolStd
                     } else {
@@ -814,7 +819,6 @@ impl Step for LldWrapper {
             fields(build_compiler = ?self.build_compiler, target_compiler = ?self.target_compiler),
         ),
     )]
-
     fn run(self, builder: &Builder<'_>) -> ToolBuildResult {
         if builder.config.dry_run() {
             return ToolBuildResult {

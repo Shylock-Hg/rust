@@ -368,7 +368,7 @@ impl<'tcx> Printer<'tcx> for SymbolMangler<'tcx> {
     }
 
     fn print_region(&mut self, region: ty::Region<'_>) -> Result<(), PrintError> {
-        let i = match *region {
+        let i = match region.kind() {
             // Erased lifetimes use the index 0, for a
             // shorter mangling of `L_`.
             ty::ReErased => 0,
@@ -858,7 +858,8 @@ impl<'tcx> Printer<'tcx> for SymbolMangler<'tcx> {
             | DefPathData::GlobalAsm
             | DefPathData::Impl
             | DefPathData::MacroNs(_)
-            | DefPathData::LifetimeNs(_) => {
+            | DefPathData::LifetimeNs(_)
+            | DefPathData::AnonAssocTy => {
                 bug!("symbol_names: unexpected DefPathData: {:?}", disambiguated_data.data)
             }
         };

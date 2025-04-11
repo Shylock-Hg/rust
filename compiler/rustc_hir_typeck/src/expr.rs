@@ -482,7 +482,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
             // All of these constitute a read, or match on something that isn't `!`,
             // which would require a `NeverToAny` coercion.
-            hir::PatKind::Binding(_, _, _, _)
+            hir::PatKind::Missing
+            | hir::PatKind::Binding(_, _, _, _)
             | hir::PatKind::Struct(_, _, _)
             | hir::PatKind::TupleStruct(_, _, _)
             | hir::PatKind::Tuple(_, _)
@@ -2204,8 +2205,12 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 let fields = listify(&missing_mandatory_fields, |f| format!("`{f}`")).unwrap();
                 self.dcx()
                     .struct_span_err(
-                        span.shrink_to_hi(),
-                        format!("missing mandatory field{s} {fields}"),
+                        span.shrink_to_lo(),
+                        format!("missing field{s} {fields} in initializer"),
+                    )
+                    .with_span_label(
+                        span.shrink_to_lo(),
+                        "fields that do not have a defaulted value must be provided explicitly",
                     )
                     .emit();
                 return;
@@ -2915,8 +2920,13 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         }
         // We failed to check the expression, report an error.
 
-        // Emits an error if we deref an infer variable, like calling `.field` on a base type of &_.
-        self.structurally_resolve_type(autoderef.span(), autoderef.final_ty(false));
+        // Emits an error if we deref an infer variable, like calling `.field` on a base type
+        // of `&_`. We can also use this to suppress unnecessary "missing field" errors that
+        // will follow ambiguity errors.
+        let final_ty = self.structurally_resolve_type(autoderef.span(), autoderef.final_ty(false));
+        if let ty::Error(_) = final_ty.kind() {
+            return final_ty;
+        }
 
         if let Some((adjustments, did)) = private_candidate {
             // (#90483) apply adjustments to avoid ExprUseVisitor from

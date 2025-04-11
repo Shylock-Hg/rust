@@ -320,7 +320,7 @@ pub(crate) fn clean_middle_const<'tcx>(
 }
 
 pub(crate) fn clean_middle_region(region: ty::Region<'_>) -> Option<Lifetime> {
-    match *region {
+    match region.kind() {
         ty::ReStatic => Some(Lifetime::statik()),
         _ if !region.has_name() => None,
         ty::ReBound(_, ty::BoundRegion { kind: ty::BoundRegionKind::Named(_, name), .. }) => {
@@ -1088,7 +1088,7 @@ fn clean_fn_decl_legacy_const_generics(func: &mut Function, attrs: &[hir::Attrib
 
 enum FunctionArgs<'tcx> {
     Body(hir::BodyId),
-    Names(&'tcx [Option<Ident>]),
+    Idents(&'tcx [Option<Ident>]),
 }
 
 fn clean_function<'tcx>(
@@ -1104,8 +1104,8 @@ fn clean_function<'tcx>(
             FunctionArgs::Body(body_id) => {
                 clean_args_from_types_and_body_id(cx, sig.decl.inputs, body_id)
             }
-            FunctionArgs::Names(names) => {
-                clean_args_from_types_and_names(cx, sig.decl.inputs, names)
+            FunctionArgs::Idents(idents) => {
+                clean_args_from_types_and_names(cx, sig.decl.inputs, idents)
             }
         };
         let decl = clean_fn_decl_with_args(cx, sig.decl, Some(&sig.header), args);
@@ -1117,7 +1117,7 @@ fn clean_function<'tcx>(
 fn clean_args_from_types_and_names<'tcx>(
     cx: &mut DocContext<'tcx>,
     types: &[hir::Ty<'tcx>],
-    names: &[Option<Ident>],
+    idents: &[Option<Ident>],
 ) -> Arguments {
     fn nonempty_name(ident: &Option<Ident>) -> Option<Symbol> {
         if let Some(ident) = ident
@@ -1131,7 +1131,7 @@ fn clean_args_from_types_and_names<'tcx>(
 
     // If at least one argument has a name, use `_` as the name of unnamed
     // arguments. Otherwise omit argument names.
-    let default_name = if names.iter().any(|ident| nonempty_name(ident).is_some()) {
+    let default_name = if idents.iter().any(|ident| nonempty_name(ident).is_some()) {
         kw::Underscore
     } else {
         kw::Empty
@@ -1143,7 +1143,7 @@ fn clean_args_from_types_and_names<'tcx>(
             .enumerate()
             .map(|(i, ty)| Argument {
                 type_: clean_ty(ty, cx),
-                name: names.get(i).and_then(nonempty_name).unwrap_or(default_name),
+                name: idents.get(i).and_then(nonempty_name).unwrap_or(default_name),
                 is_const: false,
             })
             .collect(),
@@ -1193,7 +1193,7 @@ fn clean_poly_fn_sig<'tcx>(
     did: Option<DefId>,
     sig: ty::PolyFnSig<'tcx>,
 ) -> FnDecl {
-    let mut names = did.map_or(&[] as &[_], |did| cx.tcx.fn_arg_names(did)).iter();
+    let mut names = did.map_or(&[] as &[_], |did| cx.tcx.fn_arg_idents(did)).iter();
 
     // We assume all empty tuples are default return type. This theoretically can discard `-> ()`,
     // but shouldn't change any code meaning.
@@ -1270,8 +1270,8 @@ fn clean_trait_item<'tcx>(trait_item: &hir::TraitItem<'tcx>, cx: &mut DocContext
                 let m = clean_function(cx, sig, trait_item.generics, FunctionArgs::Body(body));
                 MethodItem(m, None)
             }
-            hir::TraitItemKind::Fn(ref sig, hir::TraitFn::Required(names)) => {
-                let m = clean_function(cx, sig, trait_item.generics, FunctionArgs::Names(names));
+            hir::TraitItemKind::Fn(ref sig, hir::TraitFn::Required(idents)) => {
+                let m = clean_function(cx, sig, trait_item.generics, FunctionArgs::Idents(idents));
                 RequiredMethodItem(m)
             }
             hir::TraitItemKind::Type(bounds, Some(default)) => {
@@ -1941,7 +1941,7 @@ fn clean_trait_object_lifetime_bound<'tcx>(
     // Since there is a semantic difference between an implicitly elided (i.e. "defaulted") object
     // lifetime and an explicitly elided object lifetime (`'_`), we intentionally don't hide the
     // latter contrary to `clean_middle_region`.
-    match *region {
+    match region.kind() {
         ty::ReStatic => Some(Lifetime::statik()),
         ty::ReEarlyParam(region) => Some(Lifetime(region.name)),
         ty::ReBound(_, ty::BoundRegion { kind: ty::BoundRegionKind::Named(_, name), .. }) => {
@@ -1972,7 +1972,7 @@ fn can_elide_trait_object_lifetime_bound<'tcx>(
     // > If there is a unique bound from the containing type then that is the default
     // If there is a default object lifetime and the given region is lexically equal to it, elide it.
     match default {
-        ObjectLifetimeDefault::Static => return *region == ty::ReStatic,
+        ObjectLifetimeDefault::Static => return region.kind() == ty::ReStatic,
         // FIXME(fmease): Don't compare lexically but respect de Bruijn indices etc. to handle shadowing correctly.
         ObjectLifetimeDefault::Arg(default) => return region.get_name() == default.get_name(),
         // > If there is more than one bound from the containing type then an explicit bound must be specified
@@ -1992,7 +1992,7 @@ fn can_elide_trait_object_lifetime_bound<'tcx>(
         // Note however that at the time of this writing it should be fine to disregard this subtlety
         // as we neither render const exprs faithfully anyway (hiding them in some places or using `_` instead)
         // nor show the contents of fn bodies.
-        [] => *region == ty::ReStatic,
+        [] => region.kind() == ty::ReStatic,
         // > If the trait is defined with a single lifetime bound then that bound is used.
         // > If 'static is used for any lifetime bound then 'static is used.
         // FIXME(fmease): Don't compare lexically but respect de Bruijn indices etc. to handle shadowing correctly.
@@ -2612,7 +2612,7 @@ fn clean_bare_fn_ty<'tcx>(
             .filter(|p| !is_elided_lifetime(p))
             .map(|x| clean_generic_param(cx, None, x))
             .collect();
-        let args = clean_args_from_types_and_names(cx, bare_fn.decl.inputs, bare_fn.param_names);
+        let args = clean_args_from_types_and_names(cx, bare_fn.decl.inputs, bare_fn.param_idents);
         let decl = clean_fn_decl_with_args(cx, bare_fn.decl, None, args);
         (generic_params, decl)
     });
@@ -3148,8 +3148,8 @@ fn clean_maybe_renamed_foreign_item<'tcx>(
     let def_id = item.owner_id.to_def_id();
     cx.with_param_env(def_id, |cx| {
         let kind = match item.kind {
-            hir::ForeignItemKind::Fn(sig, names, generics) => ForeignFunctionItem(
-                clean_function(cx, &sig, generics, FunctionArgs::Names(names)),
+            hir::ForeignItemKind::Fn(sig, idents, generics) => ForeignFunctionItem(
+                clean_function(cx, &sig, generics, FunctionArgs::Idents(idents)),
                 sig.header.safety(),
             ),
             hir::ForeignItemKind::Static(ty, mutability, safety) => ForeignStaticItem(

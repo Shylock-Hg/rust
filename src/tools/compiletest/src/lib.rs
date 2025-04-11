@@ -139,7 +139,6 @@ pub fn parse_config(args: Vec<String>) -> Config {
         .optflag("", "quiet", "print one character per test instead of one line")
         .optopt("", "color", "coloring: auto, always, never", "WHEN")
         .optflag("", "json", "emit json output instead of plaintext output")
-        .optopt("", "logfile", "file to log test execution to", "FILE")
         .optopt("", "target", "the target to build for", "TARGET")
         .optopt("", "host", "the host to build for", "HOST")
         .optopt("", "cdb", "path to CDB to use for CDB debuginfo tests", "PATH")
@@ -378,7 +377,6 @@ pub fn parse_config(args: Vec<String>) -> Config {
             "never" => Some(false),
             _ => panic!("unknown `--run` option `{}` given", mode),
         }),
-        logfile: matches.opt_str("logfile").map(|s| PathBuf::from(&s)),
         runner: matches.opt_str("runner"),
         host_rustcflags: matches.opt_strs("host-rustcflags"),
         target_rustcflags: matches.opt_strs("target-rustcflags"),
@@ -433,6 +431,7 @@ pub fn parse_config(args: Vec<String>) -> Config {
 
         target_cfgs: OnceLock::new(),
         builtin_cfg_names: OnceLock::new(),
+        supported_crate_types: OnceLock::new(),
 
         nocapture: matches.opt_present("no-capture"),
 
@@ -531,10 +530,14 @@ pub fn run_tests(config: Arc<Config>) {
     }
     // Prevent issue #21352 UAC blocking .exe containing 'patch' etc. on Windows
     // If #11207 is resolved (adding manifest to .exe) this becomes unnecessary
-    env::set_var("__COMPAT_LAYER", "RunAsInvoker");
+    //
+    // SAFETY: at this point we're still single-threaded.
+    unsafe { env::set_var("__COMPAT_LAYER", "RunAsInvoker") };
 
-    // Let tests know which target they're running as
-    env::set_var("TARGET", &config.target);
+    // Let tests know which target they're running as.
+    //
+    // SAFETY: at this point we're still single-threaded.
+    unsafe { env::set_var("TARGET", &config.target) };
 
     let mut configs = Vec::new();
     if let Mode::DebugInfo = config.mode {

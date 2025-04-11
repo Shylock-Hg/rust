@@ -10,7 +10,6 @@ use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::Arc;
 use std::{env, iter, str};
 
-use anyhow::Context;
 use colored::Colorize;
 use regex::{Captures, Regex};
 use tracing::*;
@@ -143,11 +142,11 @@ pub fn run(config: Arc<Config>, testpaths: &TestPaths, revision: Option<&str>) {
     }
 
     let cx = TestCx { config: &config, props: &props, testpaths, revision };
-    create_dir_all(&cx.output_base_dir())
-        .with_context(|| {
-            format!("failed to create output base directory {}", cx.output_base_dir().display())
-        })
-        .unwrap();
+
+    if let Err(e) = create_dir_all(&cx.output_base_dir()) {
+        panic!("failed to create output base directory {}: {e}", cx.output_base_dir().display());
+    }
+
     if props.incremental {
         cx.init_incremental_test();
     }
@@ -178,6 +177,7 @@ pub fn compute_stamp_hash(config: &Config) -> String {
     let mut hash = DefaultHasher::new();
     config.stage_id.hash(&mut hash);
     config.run.hash(&mut hash);
+    config.edition.hash(&mut hash);
 
     match config.debugger {
         Some(Debugger::Cdb) => {
@@ -446,8 +446,8 @@ impl<'test> TestCx<'test> {
 
         self.compose_and_run(
             rustc,
-            self.config.compile_lib_path.to_str().unwrap(),
-            Some(aux_dir.to_str().unwrap()),
+            self.config.compile_lib_path.as_path(),
+            Some(aux_dir.as_path()),
             src,
         )
     }
@@ -710,10 +710,6 @@ impl<'test> TestCx<'test> {
             self.testpaths.file.display().to_string()
         };
 
-        // If the testcase being checked contains at least one expected "help"
-        // message, then we'll ensure that all "help" messages are expected.
-        // Otherwise, all "help" messages reported by the compiler will be ignored.
-        // This logic also applies to "note" messages.
         let expect_help = expected_errors.iter().any(|ee| ee.kind == Some(ErrorKind::Help));
         let expect_note = expected_errors.iter().any(|ee| ee.kind == Some(ErrorKind::Note));
 
@@ -801,22 +797,24 @@ impl<'test> TestCx<'test> {
     }
 
     /// Returns `true` if we should report an error about `actual_error`,
-    /// which did not match any of the expected error. We always require
-    /// errors/warnings to be explicitly listed, but only require
-    /// helps/notes if there are explicit helps/notes given.
+    /// which did not match any of the expected error.
     fn is_unexpected_compiler_message(
         &self,
         actual_error: &Error,
         expect_help: bool,
         expect_note: bool,
     ) -> bool {
-        !actual_error.msg.is_empty()
-            && match actual_error.kind {
-                Some(ErrorKind::Help) => expect_help,
-                Some(ErrorKind::Note) => expect_note,
-                Some(ErrorKind::Error) | Some(ErrorKind::Warning) => true,
-                Some(ErrorKind::Suggestion) | None => false,
-            }
+        actual_error.require_annotation
+            && actual_error.kind.map_or(false, |err_kind| {
+                // If the test being checked doesn't contain any "help" or "note" annotations, then
+                // we don't require annotating "help" or "note" (respecively) diagnostics at all.
+                let default_require_annotations = self.props.require_annotations[&err_kind];
+                match err_kind {
+                    ErrorKind::Help => expect_help && default_require_annotations,
+                    ErrorKind::Note => expect_note && default_require_annotations,
+                    _ => default_require_annotations,
+                }
+            })
     }
 
     fn should_emit_metadata(&self, pm: Option<PassMode>) -> Emit {
@@ -971,15 +969,15 @@ impl<'test> TestCx<'test> {
         delete_after_success: bool,
     ) -> ProcRes {
         let prepare_env = |cmd: &mut Command| {
-            for key in &self.props.unset_exec_env {
-                cmd.env_remove(key);
-            }
-
             for (key, val) in &self.props.exec_env {
                 cmd.env(key, val);
             }
             for (key, val) in env_extra {
                 cmd.env(key, val);
+            }
+
+            for key in &self.props.unset_exec_env {
+                cmd.env_remove(key);
             }
         };
 
@@ -1023,8 +1021,8 @@ impl<'test> TestCx<'test> {
 
                 self.compose_and_run(
                     test_client,
-                    self.config.run_lib_path.to_str().unwrap(),
-                    Some(aux_dir.to_str().unwrap()),
+                    self.config.run_lib_path.as_path(),
+                    Some(aux_dir.as_path()),
                     None,
                 )
             }
@@ -1038,8 +1036,8 @@ impl<'test> TestCx<'test> {
 
                 self.compose_and_run(
                     wr_run,
-                    self.config.run_lib_path.to_str().unwrap(),
-                    Some(aux_dir.to_str().unwrap()),
+                    self.config.run_lib_path.as_path(),
+                    Some(aux_dir.as_path()),
                     None,
                 )
             }
@@ -1053,8 +1051,8 @@ impl<'test> TestCx<'test> {
 
                 self.compose_and_run(
                     program,
-                    self.config.run_lib_path.to_str().unwrap(),
-                    Some(aux_dir.to_str().unwrap()),
+                    self.config.run_lib_path.as_path(),
+                    Some(aux_dir.as_path()),
                     None,
                 )
             }
@@ -1200,8 +1198,8 @@ impl<'test> TestCx<'test> {
         self.props.unset_rustc_env.iter().fold(&mut rustc, Command::env_remove);
         self.compose_and_run(
             rustc,
-            self.config.compile_lib_path.to_str().unwrap(),
-            Some(aux_dir.to_str().unwrap()),
+            self.config.compile_lib_path.as_path(),
+            Some(aux_dir.as_path()),
             input,
         )
     }
@@ -1222,8 +1220,7 @@ impl<'test> TestCx<'test> {
         rustc.args(&["--crate-type", "rlib"]);
         rustc.arg("-Cpanic=abort");
 
-        let res =
-            self.compose_and_run(rustc, self.config.compile_lib_path.to_str().unwrap(), None, None);
+        let res = self.compose_and_run(rustc, self.config.compile_lib_path.as_path(), None, None);
         if !res.status.success() {
             self.fatal_proc_rec(
                 &format!(
@@ -1335,8 +1332,8 @@ impl<'test> TestCx<'test> {
 
         let auxres = aux_cx.compose_and_run(
             aux_rustc,
-            aux_cx.config.compile_lib_path.to_str().unwrap(),
-            Some(aux_dir.to_str().unwrap()),
+            aux_cx.config.compile_lib_path.as_path(),
+            Some(aux_dir.as_path()),
             None,
         );
         if !auxres.status.success() {
@@ -1376,8 +1373,8 @@ impl<'test> TestCx<'test> {
     fn compose_and_run(
         &self,
         mut command: Command,
-        lib_path: &str,
-        aux_path: Option<&str>,
+        lib_path: &Path,
+        aux_path: Option<&Path>,
         input: Option<String>,
     ) -> ProcRes {
         let cmdline = {
@@ -1809,7 +1806,7 @@ impl<'test> TestCx<'test> {
         }
     }
 
-    fn make_cmdline(&self, command: &Command, libpath: &str) -> String {
+    fn make_cmdline(&self, command: &Command, libpath: &Path) -> String {
         use crate::util;
 
         // Linux and mac don't require adjusting the library search path
@@ -1822,7 +1819,7 @@ impl<'test> TestCx<'test> {
                 format!("{}=\"{}\"", util::lib_path_env_var(), util::make_new_path(path))
             }
 
-            format!("{} {:?}", lib_path_cmd_prefix(libpath), command)
+            format!("{} {:?}", lib_path_cmd_prefix(libpath.to_str().unwrap()), command)
         }
     }
 
@@ -1983,7 +1980,8 @@ impl<'test> TestCx<'test> {
         // Add custom flags supplied by the `filecheck-flags:` test header.
         filecheck.args(&self.props.filecheck_flags);
 
-        self.compose_and_run(filecheck, "", None, None)
+        // FIXME(jieyouxu): don't pass an empty Path
+        self.compose_and_run(filecheck, Path::new(""), None, None)
     }
 
     fn charset() -> &'static str {

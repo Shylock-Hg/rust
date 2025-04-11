@@ -442,7 +442,7 @@ impl<'tcx> TypeFolder<TyCtxt<'tcx>> for RemapLateParam<'tcx> {
     }
 
     fn fold_region(&mut self, r: ty::Region<'tcx>) -> ty::Region<'tcx> {
-        if let ty::ReLateParam(fr) = *r {
+        if let ty::ReLateParam(fr) = r.kind() {
             ty::Region::new_late_param(
                 self.tcx,
                 fr.scope,
@@ -1046,11 +1046,11 @@ fn report_trait_method_mismatch<'tcx>(
             // argument pattern and type.
             let (sig, body) = tcx.hir_expect_impl_item(impl_m.def_id.expect_local()).expect_fn();
             let span = tcx
-                .hir_body_param_names(body)
+                .hir_body_param_idents(body)
                 .zip(sig.decl.inputs.iter())
-                .map(|(param_name, ty)| {
-                    if let Some(param_name) = param_name {
-                        param_name.span.to(ty.span)
+                .map(|(param_ident, ty)| {
+                    if let Some(param_ident) = param_ident {
+                        param_ident.span.to(ty.span)
                     } else {
                         ty.span
                     }
